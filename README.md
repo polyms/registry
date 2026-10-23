@@ -8,7 +8,7 @@ This project lets you deploy an update server for [Electron](https://www.electro
 The result will be faster and more lightweight than any other solution out there! :rocket:
 
 - Recommended by Electron [here](https://www.electronjs.org/docs/tutorial/updates#deploying-an-update-server)
-- Built on top of [micro](https://github.com/zeit/micro), the tiniest HTTP framework for Node.js
+- Built on top of [Hono](https://hono.dev), running as one Vercel function
 - Pulls the latest release data from [GitHub Releases](https://help.github.com/articles/creating-releases/) and caches it in memory
 - Refreshes the cache every **15 minutes** (custom interval [possible](#options))
 - When asked for an update, it returns the link to the GitHub asset directly (saves bandwidth)
@@ -86,11 +86,11 @@ Since the [Windows version](https://github.com/Squirrel/Squirrel.Windows) of Squ
 You can add Hazel to an existing HTTP server, if you want. For example, this will allow you to implement custom analytics on certain paths.
 
 ```js
-const hazel = require('hazel-server')
+import { createApp } from './src/app.ts'
 
-http.createServer((req, res) => {
-	hazel(req, res)
-})
+const app = createApp({ account, repository })
+
+export default app
 ```
 
 ## Contributing

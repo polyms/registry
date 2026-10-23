@@ -1,5 +1,6 @@
-/* global describe, it, expect */
-const Cache = require('../lib/cache')
+import { describe, expect, it } from 'vitest'
+
+import Cache from '../src/cache.js'
 
 describe('Cache', () => {
 	it('should throw when account is not defined', () => {
@@ -60,6 +61,6 @@ describe('Cache', () => {
 		const cache = new Cache(config)
 		const storage = await cache.loadCache()
 
-		console.log(storage.platforms.darwin)
+		console.log(storage.platforms?.darwin)
 	})
 })
