@@ -17,6 +17,7 @@
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"check": "biome check --write . && prettier -l --write .",
+		"vercel-build": "node scripts/compile-views.mjs",
 		"test": "biome lint . && vitest run",
 		"prepare": "husky"
 	},

@@ -1,0 +1,17 @@
+{
+	"compilerOptions": {
+		"allowSyntheticDefaultImports": true,
+		"esModuleInterop": true,
+		"jsx": "react-jsx",
+		"jsxImportSource": "hono/jsx",
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"outDir": "dist/views",
+		"rootDir": "src/views",
+		"skipLibCheck": true,
+		"strict": true,
+		"target": "es2022",
+		"types": []
+	},
+	"include": ["src/views/**/*.ts", "src/views/**/*.tsx"]
+}

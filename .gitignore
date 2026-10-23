@@ -5,3 +5,7 @@ coverage
 node_modules
 .vercel
 .env*
+
+# emitted for the Vercel file trace (`pnpm vercel-build`)
+dist/views
+src/views/*.js
