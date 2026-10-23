@@ -6,19 +6,19 @@ import { renderOverview } from '../src/views/overview.js'
 
 const tags = [
 	{
-		object: { sha: 'old', type: 'tag', url: 'https://example.test/tags/old' },
+		object: { sha: 'old', type: 'tag', url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/old' },
 		ref: 'refs/tags/ui-kit@1.0.4',
 	},
 	{
-		object: { sha: 'docs', type: 'tag', url: 'https://example.test/tags/docs' },
+		object: { sha: 'docs', type: 'tag', url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/docs' },
 		ref: 'refs/tags/docs@0.4.38',
 	},
 	{
-		object: { sha: 'new', type: 'tag', url: 'https://example.test/tags/new' },
+		object: { sha: 'new', type: 'tag', url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/new' },
 		ref: 'refs/tags/ui-kit@1.0.5',
 	},
 	{
-		object: { sha: 'bad', type: 'tag', url: 'https://example.test/tags/bad' },
+		object: { sha: 'bad', type: 'tag', url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/bad' },
 		ref: 'refs/tags/ui-kit@not-a-version',
 	},
 ]
@@ -30,7 +30,7 @@ afterEach(() => {
 describe('package catalog', () => {
 	it('parses package names from the env string', () => {
 		expect(parsePackageNames(undefined)).toEqual(['@polyms/ui-kit'])
-		expect(parsePackageNames('@polyms/ui-kit, @polyms/icons, nope')).toEqual([
+		expect(parsePackageNames('@polyms/ui-kit, @polyms/icons, nope, @polyms/.., @a/b/c')).toEqual([
 			'@polyms/ui-kit',
 			'@polyms/icons',
 		])
@@ -68,6 +68,47 @@ describe('package catalog', () => {
 		expect(releases.map(release => release.version)).toEqual(['1.0.5', '1.0.4'])
 		expect(releases[0]?.publishedAt).toBe('2026-07-28T11:36:20Z')
 		expect(releases[1]?.publishedAt).toBe('2026-07-01T00:00:00Z')
+	})
+
+	it('does not send the token to a tag object outside the repo', async () => {
+		const fetchMock = vi.fn(async (url: string) => {
+			if (String(url).includes('matching-refs')) {
+				return Response.json([
+					{
+						object: { url: 'https://example.test/steal' },
+						ref: 'refs/tags/ui-kit@1.2.0',
+					},
+					{
+						object: { url: 'https://api.github.com/repos/other/secret/contents/.env' },
+						ref: 'refs/tags/ui-kit@1.1.0',
+					},
+					{
+						object: { url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/ok' },
+						ref: 'refs/tags/ui-kit@1.0.0',
+					},
+				])
+			}
+
+			return Response.json({ tagger: { date: '2026-07-28T11:36:20Z' } })
+		})
+		vi.stubGlobal('fetch', fetchMock)
+
+		const releases = await new PackageCatalog({
+			account: 'polyms',
+			packages: ['@polyms/ui-kit'],
+			token: 'test-token',
+		}).load('@polyms/ui-kit')
+
+		expect(releases.map(release => release.version)).toEqual(['1.2.0', '1.1.0', '1.0.0'])
+		expect(releases[0]?.publishedAt).toBeUndefined()
+		expect(releases[1]?.publishedAt).toBeUndefined()
+		expect(releases[2]?.publishedAt).toBe('2026-07-28T11:36:20Z')
+
+		const urls = fetchMock.mock.calls.map(call => String(call[0]))
+		expect(urls.every(url => url.startsWith('https://api.github.com/repos/polyms/ui-kit/'))).toBe(true)
+		expect(urls.join('\n')).not.toContain('example.test')
+		expect(urls.join('\n')).not.toContain('other/secret')
+		expect(urls.join('\n')).not.toContain('test-token')
 	})
 })
 

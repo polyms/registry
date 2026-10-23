@@ -1,6 +1,7 @@
 import retry from 'async-retry'
 import ms from 'ms'
 
+import { fetchRepo, redactNotes } from './github-guard.js'
 import checkPlatform from './platform.js'
 
 export type CacheConfig = {
@@ -85,16 +86,12 @@ export default class Cache {
 	}
 
 	async cacheReleaseList(url: string) {
-		const { token } = this.config
-		const headers: Record<string, string> = { Accept: 'application/vnd.github.preview' }
-
-		if (token && typeof token === 'string' && token.length > 0) {
-			headers.Authorization = `token ${token}`
-		}
+		const { account, repository, token } = this.config
+		if (!account || !repository) throw new Error('Refused GitHub URL')
 
 		const response = await retry(
 			async () => {
-				const result = await fetch(url, { headers })
+				const result = await fetchRepo(url, token, 'application/vnd.github.preview', account, repository)
 
 				if (result.status !== 200) {
 					throw new Error(`Tried to cache RELEASES, but failed fetching ${url}, status ${result.status}`)
@@ -105,34 +102,38 @@ export default class Cache {
 			{ retries: 3 }
 		)
 
-		let content = await response.text()
+		let content = redactNotes(await response.text(), token)
 		const matches = content.match(/[^ ]*\.nupkg/gim)
+		const base = url.split('?')[0]?.split('#')[0] ?? url
 
-		if (!matches || matches.length === 0) {
+		if (
+			!matches ||
+			matches.length === 0 ||
+			!base.startsWith(`https://github.com/${account}/${repository}/`)
+		) {
 			throw new Error(`Tried to cache RELEASES, but failed. RELEASES content doesn't contain nupkg`)
 		}
 
 		for (const match of matches) {
-			const nuPKG = url.replace('RELEASES', match)
+			if (match.includes('/') || match.includes('\\') || match.includes('..')) continue
+
+			const nuPKG = base.replace('RELEASES', match)
 			content = content.replace(match, nuPKG)
 		}
 
-		return content
+		return redactNotes(content, token)
 	}
 
 	async refreshCache() {
 		const { account, repository, pre, token } = this.config
+		if (!account || !repository) return
+
 		const repo = `${account}/${repository}`
 		const url = `https://api.github.com/repos/${repo}/releases?per_page=100`
-		const headers: Record<string, string> = { Accept: 'application/vnd.github.preview' }
-
-		if (token && typeof token === 'string' && token.length > 0) {
-			headers.Authorization = `token ${token}`
-		}
 
 		const response = await retry(
 			async () => {
-				const result = await fetch(url, { headers })
+				const result = await fetchRepo(url, token, 'application/vnd.github.preview', account, repository)
 
 				if (result.status !== 200) {
 					throw new Error(`GitHub API responded with ${result.status} for url ${url}`)
@@ -179,7 +180,7 @@ export default class Cache {
 		console.log(`Caching version ${tag_name}...`)
 
 		this.latest.version = tag_name
-		this.latest.notes = release.body
+		this.latest.notes = typeof release.body === 'string' ? redactNotes(release.body, token) : release.body
 		this.latest.pub_date = release.published_at
 		this.latest.platforms = {}
 

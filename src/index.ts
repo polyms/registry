@@ -1,6 +1,7 @@
 import type { Hono } from 'hono'
 
 import { createApp, parseAppNames } from './app.js'
+import { stripUserinfo } from './github-guard.js'
 import { parsePackageNames } from './package-catalog.js'
 
 export type { Hono }
@@ -17,7 +18,7 @@ const {
 	PUBLIC_URL,
 } = process.env
 
-const url = PUBLIC_URL || VERCEL_URL || privateBaseUrl
+const url = stripUserinfo(PUBLIC_URL || VERCEL_URL || privateBaseUrl)
 
 const app = createApp({
 	account,

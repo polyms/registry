@@ -1,6 +1,8 @@
 import ms from 'ms'
 import semver from 'semver'
 
+import { fetchRepo, isRepoGitObjectUrl, isSafePackageName, isSafeSlug } from './github-guard.js'
+
 const defaultPackage = '@polyms/ui-kit'
 
 export type PackageRelease = {
@@ -25,7 +27,7 @@ export function parsePackageNames(value: string | undefined): string[] {
 	const names = value
 		.split(',')
 		.map(item => item.trim())
-		.filter(item => /^@[^/\s]+\/[^/\s]+$/.test(item))
+		.filter(item => isSafePackageName(item))
 
 	return [...new Set(names)]
 }
@@ -100,18 +102,6 @@ export class PackageCatalog {
 		})
 	}
 
-	private headers() {
-		const headers: Record<string, string> = {
-			Accept: 'application/vnd.github+json',
-			'User-Agent': 'polyms-registry',
-		}
-		const { token } = this.config
-
-		if (token && token.length > 0) headers.Authorization = `token ${token}`
-
-		return headers
-	}
-
 	private async refresh() {
 		let failed = false
 
@@ -130,8 +120,11 @@ export class PackageCatalog {
 
 	private async loadPackage(name: string) {
 		const slug = packageSlug(name)
-		const url = `https://api.github.com/repos/${this.config.account}/${slug}/git/matching-refs/tags/${slug}@`
-		const response = await fetch(url, { headers: this.headers() })
+		const { account, token } = this.config
+		if (!isSafeSlug(account) || !isSafeSlug(slug)) throw new Error('Refused GitHub URL')
+
+		const url = `https://api.github.com/repos/${account}/${slug}/git/matching-refs/tags/${slug}@`
+		const response = await fetchRepo(url, token, 'application/vnd.github+json', account, slug)
 
 		if (!response.ok) {
 			throw new Error(`GitHub API responded with ${response.status} for url ${url}`)
@@ -144,7 +137,7 @@ export class PackageCatalog {
 
 		return Promise.all(
 			selected.map(async release => {
-				const publishedAt = await this.publishedAt(release.url)
+				const publishedAt = await this.publishedAt(release.url, packageSlug(name))
 				return {
 					publishedAt,
 					tag: release.tag,
@@ -154,11 +147,12 @@ export class PackageCatalog {
 		)
 	}
 
-	private async publishedAt(url: string | undefined) {
-		if (!url) return undefined
+	private async publishedAt(url: string | undefined, slug: string) {
+		const { account, token } = this.config
+		if (!url || !isRepoGitObjectUrl(url, account, slug)) return undefined
 
 		try {
-			const response = await fetch(url, { headers: this.headers() })
+			const response = await fetchRepo(url, token, 'application/vnd.github+json', account, slug)
 			if (!response.ok) return undefined
 
 			const body = (await response.json()) as TagObject

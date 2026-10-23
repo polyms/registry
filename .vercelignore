@@ -3,3 +3,8 @@ test
 .circleci
 .yarnrc
 .gitignore
+.env*
+*.pem
+*.key
+*.p12
+*.cer

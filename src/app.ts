@@ -6,8 +6,19 @@ import { TrieRouter } from 'hono/router/trie-router'
 import semver from 'semver'
 
 import checkAlias from './aliases.js'
-import Cache, { type CacheConfig, type LatestCache, type ListedRelease } from './cache.js'
+import Cache, { type CacheConfig, type ListedRelease } from './cache.js'
 import { downloadTarget } from './download-target.js'
+import {
+	containsToken,
+	fetchRepo,
+	isPublicReleaseAsset,
+	isSafePackageName,
+	isSafeSlug,
+	ownedBrowserDownload,
+	redactNotes,
+	releaseAssetLocation,
+	sanitizeLatestJson,
+} from './github-guard.js'
 import { mountNpmProxy } from './npm-proxy.js'
 import { PackageCatalog, type PackageRelease, packageSlug, parsePackageNames } from './package-catalog.js'
 import { productTitle, renderOverview } from './views/overview.js'
@@ -37,35 +48,8 @@ type ReleaseAsset = {
 	url?: string
 }
 
-type LatestJson = {
-	platforms?: Record<string, { url?: string }>
-}
-
 function isCodedError(error: unknown): error is CodedError {
 	return error instanceof Error && 'code' in error && typeof error.code === 'string'
-}
-
-function githubHeaders(token: string | undefined, accept: string) {
-	const headers: Record<string, string> = { Accept: accept }
-
-	if (token && token.length > 0) {
-		headers.Authorization = `token ${token}`
-	}
-
-	return headers
-}
-
-async function fetchPrivateAsset(assetUrl: string, token: string | undefined, accept: string) {
-	return fetch(assetUrl, { headers: githubHeaders(token, accept) })
-}
-
-async function privateDownloadLocation(apiUrl: string, token: string) {
-	const assetResponse = await fetch(apiUrl, {
-		headers: githubHeaders(token, 'application/octet-stream'),
-		redirect: 'manual',
-	})
-
-	return assetResponse.headers.get('Location')
 }
 
 const platformOrder = ['dmg', 'exe', 'deb', 'rpm', 'AppImage', 'darwin', 'tar.gz']
@@ -101,7 +85,7 @@ export function parseAppNames(value: string | undefined): string[] {
 			value
 				.split(',')
 				.map(item => item.trim())
-				.filter(item => item.length > 0)
+				.filter(item => isSafeSlug(item))
 		),
 	]
 }
@@ -163,7 +147,7 @@ function buildApp(
 					return {
 						date: publishedAt ? formatDistanceToNow(publishedAt, { addSuffix: true }) : '',
 						files,
-						notes: latest?.notes ?? '',
+						notes: redactNotes(latest?.notes ?? '', token),
 						product: name,
 						releasesHref: `/${name}/releases`,
 						version: latest?.version ?? '',
@@ -217,31 +201,38 @@ function buildApp(
 
 		try {
 			const releaseUrl = `https://api.github.com/repos/${account}/${name}/releases/latest`
-			const releaseResponse = await fetchPrivateAsset(releaseUrl, token, 'application/vnd.github.v3+json')
+			const releaseResponse = await fetchRepo(
+				releaseUrl,
+				token,
+				'application/vnd.github.v3+json',
+				account,
+				name
+			)
 
-			if (!releaseResponse.ok) {
-				throw new Error(`Failed to fetch release info: ${releaseResponse.statusText}`)
-			}
+			if (!releaseResponse.ok) throw new Error('Failed to fetch release info')
 
 			const releaseData = (await releaseResponse.json()) as { assets?: ReleaseAsset[] }
 			const latestJsonAsset = releaseData.assets?.find(asset => asset.name === 'latest.json')
 
 			if (!latestJsonAsset?.url) throw new Error('latest.json not found in release assets')
 
-			const response = await fetchPrivateAsset(latestJsonAsset.url, token, 'application/octet-stream')
+			const response = await fetchRepo(latestJsonAsset.url, token, 'application/octet-stream', account, name)
 
-			if (!response.ok) throw new Error(`Failed to fetch latest.json: ${response.statusText}`)
+			if (!response.ok) throw new Error('Failed to fetch latest.json')
 
-			const latestJson = (await response.json()) as LatestJson
-
-			if (shouldProxyPrivateDownload && latestJson.platforms && url) {
-				for (const platformData of Object.values(latestJson.platforms)) {
-					if (!platformData.url) continue
-					platformData.url = platformData.url.replace(
-						`github.com/${account}/${name}/releases`,
-						`${url}/${name}`
-					)
+			const latestJson = sanitizeLatestJson(
+				(await response.json()) as Parameters<typeof sanitizeLatestJson>[0],
+				{
+					account,
+					base: url,
+					proxy: shouldProxyPrivateDownload,
+					repo: name,
+					token,
 				}
+			)
+
+			if (containsToken(JSON.stringify(latestJson), token)) {
+				return c.json({ error: 'Error fetching latest.json' }, 500)
 			}
 
 			return c.json(latestJson)
@@ -263,12 +254,15 @@ function buildApp(
 		if (!platform || !asset) return c.text('No download available for your platform!', 404)
 
 		if (shouldProxyPrivateDownload && token) {
-			const location = await privateDownloadLocation(asset.api_url, token)
-			if (!location) return c.body(null, 302)
+			const location = await releaseAssetLocation(asset.api_url, token, account, name)
+			if (!location) return c.text('No download available for your platform!', 404)
 			return c.redirect(location, 302)
 		}
 
-		return c.redirect(asset.url, 302)
+		const browser = ownedBrowserDownload(asset.url, account, name)
+		if (!browser) return c.text('No download available for your platform!', 404)
+
+		return c.redirect(browser, 302)
 	})
 
 	async function sendTaggedDownload(
@@ -282,10 +276,17 @@ function buildApp(
 		filename: string
 	) {
 		if (!version || !/^v\d+/.test(version)) return c.text('The specified platform is not valid', 500)
+		if (!isPublicReleaseAsset(filename)) return c.text('Asset not found', 404)
 
 		try {
 			const releaseUrl = `https://api.github.com/repos/${account}/${repository}/releases/tags/${version}`
-			const releaseResponse = await fetchPrivateAsset(releaseUrl, token, 'application/vnd.github.v3+json')
+			const releaseResponse = await fetchRepo(
+				releaseUrl,
+				token,
+				'application/vnd.github.v3+json',
+				account,
+				repository
+			)
 
 			if (!releaseResponse.ok) return c.text('Release not found', 404)
 
@@ -295,14 +296,17 @@ function buildApp(
 			if (!asset) return c.text('Asset not found', 404)
 
 			if (shouldProxyPrivateDownload && token && asset.url) {
-				const location = await privateDownloadLocation(asset.url, token)
-				if (!location) return c.body(null, 302)
+				const location = await releaseAssetLocation(asset.url, token, account, repository)
+				if (!location) return c.text('Asset not found', 404)
 				return c.redirect(location, 302)
 			}
 
 			if (!asset.browser_download_url) return c.text('Asset not found', 404)
 
-			return c.redirect(asset.browser_download_url, 302)
+			const browser = ownedBrowserDownload(asset.browser_download_url, account, repository)
+			if (!browser) return c.text('Asset not found', 404)
+
+			return c.redirect(browser, 302)
 		} catch (error) {
 			console.error(error)
 			return c.text('Error downloading release asset', 500)
@@ -337,12 +341,15 @@ function buildApp(
 		if (!asset) return c.text('No download available for your platform', 404)
 
 		if (shouldProxyPrivateDownload && token) {
-			const location = await privateDownloadLocation(asset.api_url, token)
-			if (!location) return c.body(null, 302)
+			const location = await releaseAssetLocation(asset.api_url, token, account, name)
+			if (!location) return c.text('No download available for your platform', 404)
 			return c.redirect(location, 302)
 		}
 
-		return c.redirect(asset.url, 302)
+		const browser = ownedBrowserDownload(asset.url, account, name)
+		if (!browser) return c.text('No download available for your platform', 404)
+
+		return c.redirect(browser, 302)
 	})
 
 	app.get('/:name/update/win32/:version/RELEASES', async c => {
@@ -355,7 +362,10 @@ function buildApp(
 
 		if (!content) return c.body(null, 204)
 
-		return c.body(content, 200, {
+		const body = redactNotes(content, token)
+		if (containsToken(body, token)) return c.body(null, 204)
+
+		return c.body(body, 200, {
 			'content-type': 'application/octet-stream',
 		})
 	})
@@ -395,8 +405,24 @@ function buildApp(
 
 		if (!asset) return c.body(null, 204)
 
+		const browser = ownedBrowserDownload(asset.url, account, name)
+		const downloadUrl =
+			shouldProxyPrivateDownload && url && !containsToken(url, token)
+				? `${url}/${name}/download/${platformName}?update=true`
+				: browser
+
+		if (!downloadUrl || containsToken(downloadUrl, token)) return c.body(null, 204)
+
 		if (!latest.version || semver.compare(latest.version, version) !== 0) {
-			return c.json(updatePayload(latest, asset.url, shouldProxyPrivateDownload, url, platformName, name))
+			const payload = {
+				name: latest.version,
+				notes: redactNotes(latest.notes ?? '', token),
+				pub_date: latest.pub_date,
+				url: downloadUrl,
+			}
+			if (containsToken(JSON.stringify(payload), token)) return c.body(null, 204)
+
+			return c.json(payload)
 		}
 
 		return c.body(null, 204)
@@ -405,37 +431,20 @@ function buildApp(
 	return app
 }
 
-function updatePayload(
-	latest: LatestCache,
-	assetUrl: string,
-	shouldProxyPrivateDownload: boolean,
-	url: string | undefined,
-	platformName: string,
-	appName: string
-) {
-	return {
-		name: latest.version,
-		notes: latest.notes,
-		pub_date: latest.pub_date,
-		url:
-			shouldProxyPrivateDownload && url ? `${url}/${appName}/download/${platformName}?update=true` : assetUrl,
-	}
-}
-
 export function createApp(
 	config: Omit<CacheConfig, 'repository'> & { apps?: string[]; packages?: string[] }
 ) {
 	try {
-		const apps = [...new Set((config.apps ?? []).map(name => name.trim()).filter(name => name.length > 0))]
+		const apps = [...new Set((config.apps ?? []).map(name => name.trim()).filter(name => isSafeSlug(name)))]
 
-		if (!config.account || apps.length === 0) {
+		if (!config.account || !isSafeSlug(config.account) || apps.length === 0) {
 			const error = new Error('Neither ACCOUNT, nor REPOSITORY are defined')
 			;(error as NodeJS.ErrnoException).code = 'missing_configuration_properties'
 			throw error
 		}
 
 		const caches = apps.map(repository => new Cache({ ...config, repository }))
-		const packages = config.packages ?? parsePackageNames(undefined)
+		const packages = (config.packages ?? parsePackageNames(undefined)).filter(name => isSafePackageName(name))
 
 		return buildApp(caches, {
 			...config,

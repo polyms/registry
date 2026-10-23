@@ -1,7 +1,10 @@
 import type { Context, Env, Hono } from 'hono'
 
+import { containsToken, signedDownloadUrl } from './github-guard.js'
+
 const GITHUB_NPM = 'https://npm.pkg.github.com'
 const TARBALL_PREFIX = `${GITHUB_NPM}/download/`
+const repoConfigKeys = ['bugs', 'directories', 'funding', 'homepage', 'repository'] as const
 
 type Packument = {
 	versions?: Record<string, { dist?: { tarball?: string } }>
@@ -15,14 +18,74 @@ type TarballRef = {
 
 type NpmPath = { kind: 'packument'; name: string } | { kind: 'tarball'; ref: TarballRef }
 
-export function rewritePackument(packument: Packument, origin: string): Packument {
+function stripRepoConfig(record: object) {
+	const target = record as Record<string, unknown>
+
+	for (const key of repoConfigKeys) delete target[key]
+}
+
+function samePackageTarball(raw: string, name: string, token?: string) {
+	if (containsToken(raw, token)) return null
+
+	let parsed: URL
+	try {
+		parsed = new URL(raw)
+	} catch {
+		return null
+	}
+
+	if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null
+
+	parsed.search = ''
+	parsed.hash = ''
+
+	let path = parsed.pathname
+	try {
+		path = decodeURIComponent(parsed.pathname)
+	} catch {
+		return null
+	}
+
+	if (parsed.hostname === 'npm.pkg.github.com') {
+		if (!path.startsWith(`/download/${name}/`)) return null
+
+		return parsed.toString()
+	}
+
+	if (parsed.hostname === 'registry.npmjs.org' && path.startsWith(`/${name}/`)) return parsed.toString()
+
+	return null
+}
+
+export function rewritePackument(
+	packument: Packument,
+	origin: string,
+	name: string,
+	token?: string
+): Packument {
+	stripRepoConfig(packument)
+
 	const versions = packument.versions
 	if (!versions) return packument
 
 	for (const version of Object.values(versions)) {
+		stripRepoConfig(version)
+
 		const dist = version.dist
-		if (!dist?.tarball?.startsWith(TARBALL_PREFIX)) continue
-		dist.tarball = `${origin}/npm/download/${dist.tarball.slice(TARBALL_PREFIX.length)}`
+		if (!dist?.tarball) continue
+
+		const cleaned = samePackageTarball(dist.tarball, name, token)
+		if (!cleaned) {
+			delete dist.tarball
+			continue
+		}
+
+		if (!cleaned.startsWith(TARBALL_PREFIX)) {
+			dist.tarball = cleaned
+			continue
+		}
+
+		dist.tarball = `${origin}/npm/download/${cleaned.slice(TARBALL_PREFIX.length)}`
 	}
 
 	return packument
@@ -100,8 +163,19 @@ function redirectStatus(status: number): 301 | 302 | 303 | 307 | 308 {
 	return 302
 }
 
+function assertNpmUrl(raw: string) {
+	const parsed = new URL(raw)
+	if (parsed.protocol !== 'https:' || parsed.hostname !== 'npm.pkg.github.com') {
+		throw new Error('Refused npm URL')
+	}
+	if (parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Refused npm URL')
+}
+
 async function proxyPackument(c: Context, token: string, name: string): Promise<Response> {
-	const upstream = await fetch(upstreamPackumentUrl(name), {
+	const upstreamUrl = upstreamPackumentUrl(name)
+	assertNpmUrl(upstreamUrl)
+
+	const upstream = await fetch(upstreamUrl, {
 		headers: authHeaders(token, c.req.header('accept')),
 		method: c.req.method,
 		redirect: 'manual',
@@ -123,19 +197,25 @@ async function proxyPackument(c: Context, token: string, name: string): Promise<
 	}
 
 	const origin = new URL(c.req.url).origin
-	return c.json(rewritePackument(packument, origin))
+	const rewritten = rewritePackument(packument, origin, name, token)
+	if (containsToken(JSON.stringify(rewritten), token)) return c.json({ error: 'upstream_error' }, 502)
+
+	return c.json(rewritten)
 }
 
 async function proxyTarball(c: Context, token: string, ref: TarballRef): Promise<Response> {
-	const upstream = await fetch(upstreamTarballUrl(ref), {
+	const upstreamUrl = upstreamTarballUrl(ref)
+	assertNpmUrl(upstreamUrl)
+
+	const upstream = await fetch(upstreamUrl, {
 		headers: authHeaders(token, 'application/octet-stream'),
 		method: c.req.method,
 		redirect: 'manual',
 	})
 
 	if (upstream.status >= 300 && upstream.status < 400) {
-		const location = upstream.headers.get('location')
-		if (!location) return c.body(null, redirectStatus(upstream.status))
+		const location = signedDownloadUrl(upstream.headers.get('location') ?? '', token)
+		if (!location) return c.json({ error: 'upstream_error' }, 502)
 		return c.redirect(location, redirectStatus(upstream.status))
 	}
 

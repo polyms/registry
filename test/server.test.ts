@@ -196,7 +196,7 @@ describe('Server', () => {
 
 	it('parses app names and rejects an empty list', async () => {
 		expect(parseAppNames(undefined)).toEqual([])
-		expect(parseAppNames(' studio, other, studio, ,')).toEqual(['studio', 'other'])
+		expect(parseAppNames(' studio, other, studio, , ../secret, studio/../x')).toEqual(['studio', 'other'])
 
 		const app = createApp({
 			account: 'polyms',
@@ -208,5 +208,122 @@ describe('Server', () => {
 
 		expect(home.status).toBe(400)
 		expect(body.error.code).toBe('missing_configuration_properties')
+	})
+
+	it('does not proxy config, keys, or another repo from release metadata', async () => {
+		const fetchMock = vi.fn(async (url: string) => {
+			const href = String(url)
+			if (href.includes('evil.example')) return new Response('secret', { status: 200 })
+			if (href.endsWith('/repos/polyms/studio/releases/latest')) {
+				return Response.json({
+					assets: [
+						{ name: 'latest.json', url: 'https://api.github.com/repos/polyms/studio/releases/assets/9' },
+					],
+				})
+			}
+			if (href.endsWith('/releases/assets/9')) {
+				return Response.json({
+					notes: 'leak ghp_abcdefghijklmnopqrstuvwxyz123456',
+					platforms: {
+						darwin: {
+							signature: 'sig',
+							url: 'https://github.com/other/secret/releases/download/v1/Secret.dmg',
+						},
+						dmg: {
+							url: 'https://user:test-token@github.com/polyms/studio/releases/download/v1/Studio.dmg?token=test-token',
+						},
+						exe: { url: 'https://github.com/polyms/studio/releases/download/v0.2.8/Studio.exe' },
+					},
+					token: 'test-token',
+				})
+			}
+			if (href.includes('/repos/polyms/studio/releases')) {
+				return Response.json([
+					{
+						assets: [
+							{
+								browser_download_url:
+									'https://evil.example/polyms/studio/releases/download/v0.2.8/Studio.dmg',
+								content_type: 'application/octet-stream',
+								name: 'Studio.dmg',
+								size: 2_000_000,
+								url: 'https://evil.example/repos/polyms/studio/releases/assets/1',
+							},
+						],
+						body: 'notes ghp_abcdefghijklmnopqrstuvwxyz123456',
+						draft: false,
+						prerelease: false,
+						published_at: '2026-01-01T00:00:00Z',
+						tag_name: 'v0.2.8',
+					},
+				])
+			}
+			return new Response('missing', { status: 404 })
+		})
+		vi.stubGlobal('fetch', fetchMock)
+
+		const app = createApp({
+			account: 'polyms',
+			apps: ['studio', '../other'],
+			packages: ['@polyms/..'],
+			token: 'test-token',
+			url: 'https://user:test-token@registry.polyms.dev',
+		})
+		const secretFile = await app.request('http://localhost/studio/download/v0.2.8/builder-debug.yml')
+		const envFile = await app.request('http://localhost/studio/download/v0.2.8/.env')
+		const keyFile = await app.request('http://localhost/studio/download/v0.2.8/certs.pem')
+		const latest = await app.request('http://localhost/studio/latest.json')
+		const latestBody = await latest.text()
+		const home = await app.request('http://localhost/')
+		const homeBody = await home.text()
+		const download = await app.request('http://localhost/studio/download/dmg')
+		const calls = fetchMock.mock.calls.map(call => String(call[0]))
+
+		expect(secretFile.status).toBe(404)
+		expect(envFile.status).toBe(404)
+		expect(keyFile.status).toBe(404)
+		expect(latest.status).toBe(200)
+		expect(latestBody).not.toContain('other/secret')
+		expect(latestBody).not.toContain('ghp_')
+		expect(latestBody).not.toContain('test-token')
+		expect(latestBody).not.toContain('user:')
+		expect(latestBody).toContain('"signature":"sig"')
+		expect(latestBody).toContain('https://registry.polyms.dev/studio/download/v0.2.8/Studio.exe')
+		expect(home.status).toBe(200)
+		expect(homeBody).not.toContain('ghp_')
+		expect(homeBody).not.toContain('test-token')
+		expect(download.status).toBe(404)
+		expect(calls.every(url => url.startsWith('https://api.github.com/repos/polyms/studio/'))).toBe(true)
+		expect(calls.join('\n')).not.toContain('evil.example')
+		expect(calls.join('\n')).not.toContain('test-token')
+	})
+
+	it('redirects a private asset only to the signed download host', async () => {
+		const location = 'https://release-assets.githubusercontent.com/asset?name=Studio.dmg'
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string) => {
+				const href = String(url)
+				if (href === 'https://api.github.com/repos/polyms/studio/releases/assets/1') {
+					return new Response(null, { headers: { Location: location }, status: 302 })
+				}
+				if (href.includes('/repos/polyms/studio/releases'))
+					return releaseResponse('studio', 'v0.2.8', 'notes', 'Studio.dmg')
+				return new Response('missing', { status: 404 })
+			})
+		)
+
+		const app = createApp({
+			account: 'polyms',
+			apps: ['studio'],
+			packages: [],
+			token: 'test-token',
+			url: 'registry.polyms.dev',
+		})
+		const response = await app.request('http://localhost/studio/download/dmg')
+
+		expect(response.status).toBe(302)
+		expect(response.headers.get('location')).toBe(location)
+		expect(response.headers.get('location')).not.toContain('test-token')
 	})
 })

@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import Cache from '../src/cache.js'
+
+afterEach(() => {
+	vi.unstubAllGlobals()
+})
 
 describe('Cache', () => {
 	it('should throw when account is not defined', () => {
@@ -62,5 +66,22 @@ describe('Cache', () => {
 		const storage = await cache.loadCache()
 
 		console.log(storage.platforms?.darwin)
+	})
+
+	it('does not follow a release list redirect to another repository', async () => {
+		const fetchMock = vi.fn(async (url: string) => {
+			if (String(url).includes('/repos/other/secret')) return Response.json([{ tag_name: 'v9.9.9' }])
+
+			return new Response(null, {
+				headers: { Location: 'https://api.github.com/repos/other/secret/releases?per_page=100' },
+				status: 301,
+			})
+		})
+		vi.stubGlobal('fetch', fetchMock)
+
+		const cache = new Cache({ account: 'zeit', repository: 'hyper', url: 'https://registry.example' })
+
+		await expect(cache.loadCache()).rejects.toThrow(/Refused release asset redirect/)
+		expect(fetchMock.mock.calls.map(call => String(call[0])).join('\n')).not.toContain('other/secret')
 	})
 })
