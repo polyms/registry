@@ -182,6 +182,24 @@ describe('npm proxy', () => {
 		expect(fetchMock).toHaveBeenCalledOnce()
 	})
 
+	it('hides an upstream 403 so clients are not told to send a token', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ message: 'Permission denied' }), {
+				headers: { 'content-type': 'application/json' },
+				status: 403,
+			})
+		)
+		vi.stubGlobal('fetch', fetchMock)
+
+		const app = appWithToken()
+		const response = await app.request('http://localhost:3000/npm/@polyms/ui-kit')
+		const body = (await response.json()) as { error: string }
+
+		expect(response.status).toBe(502)
+		expect(body.error).toBe('upstream_error')
+		expect(JSON.stringify(body)).not.toContain('Permission denied')
+	})
+
 	it('returns 404 for packages outside the allowlist', async () => {
 		const fetchMock = vi.fn()
 		vi.stubGlobal('fetch', fetchMock)

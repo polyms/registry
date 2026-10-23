@@ -36,17 +36,17 @@ pnpm add @polyms/ui-kit
 
 ## Environment
 
-| Variable     | Required           | Purpose                                                                                                              |
-| ------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `ACCOUNT`    | yes                | GitHub user or org                                                                                                   |
-| `APPS`       | yes                | Comma-separated repository names under `ACCOUNT`, such as `studio` or `studio,other`. At least one name is required. |
-| `INTERVAL`   | no                 | Cache lifetime in minutes. Default `15`                                                                              |
-| `PACKAGES`   | no                 | Comma-separated npm names, such as `@polyms/ui-kit`. Default `@polyms/ui-kit`                                        |
-| `PRE`        | no                 | Any non-empty value caches pre-releases only. Unset caches stable releases only                                      |
-| `TOKEN`      | private repos, npm | GitHub token for private release downloads and the npm proxy (`read:packages`)                                       |
-| `PUBLIC_URL` | private repos      | Public base URL written into update payloads. Falls back to `VERCEL_URL`, then `URL`                                 |
+| Variable     | Required           | Purpose                                                                                                                        |
+| ------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ACCOUNT`    | yes                | GitHub user or org                                                                                                             |
+| `APPS`       | yes                | Comma-separated repository names under `ACCOUNT`, such as `studio` or `studio,other`. At least one name is required.           |
+| `INTERVAL`   | no                 | Cache lifetime in minutes. Default `15`                                                                                        |
+| `PACKAGES`   | no                 | Comma-separated npm names, such as `@polyms/ui-kit`. Default `@polyms/ui-kit`                                                  |
+| `PRE`        | no                 | Any non-empty value caches pre-releases only. Unset caches stable releases only                                                |
+| `TOKEN`      | private repos, npm | Classic personal access token (`ghp_`) with `read:packages`. Fine-grained `github_pat_` tokens are rejected by GitHub Packages |
+| `PUBLIC_URL` | private repos      | Public base URL written into update payloads. Falls back to `VERCEL_URL`, then `URL`                                           |
 
-`TOKEN` without a base URL fails at startup (`PUBLIC_URL`, `VERCEL_URL`, or `URL` must be set). Draft releases are ignored. The release list requests up to 100 releases.
+`TOKEN` without a base URL fails at startup (`PUBLIC_URL`, `VERCEL_URL`, or `URL` must be set). The npm proxy needs a classic token: GitHub Packages returns 403 for a fine-grained `github_pat_` token, which this server answers as 502. Draft releases are ignored. The release list requests up to 100 releases.
 
 ## Routes
 

@@ -197,6 +197,11 @@ function redirectStatus(status: number): 301 | 302 | 303 | 307 | 308 {
 	return 302
 }
 
+function clientErrorStatus(status: number): number {
+	if (status === 401 || status === 403) return 502
+	return status
+}
+
 function assertNpmUrl(raw: string) {
 	const parsed = new URL(raw)
 	if (parsed.protocol !== 'https:' || parsed.hostname !== 'npm.pkg.github.com') {
@@ -219,13 +224,13 @@ async function proxyDocument(
 		redirect: 'manual',
 	})
 
-	if (c.req.method === 'HEAD') return c.body(null, upstream.status as 200)
+	if (c.req.method === 'HEAD') return c.body(null, clientErrorStatus(upstream.status) as 200)
 
 	if (upstream.status >= 300 && upstream.status < 400) {
 		return c.json({ error: 'upstream_error' }, 502)
 	}
 
-	if (!upstream.ok) return c.json({ error: 'upstream_error' }, upstream.status as 502)
+	if (!upstream.ok) return c.json({ error: 'upstream_error' }, clientErrorStatus(upstream.status) as 502)
 
 	let document: NpmDocument
 	try {
@@ -257,7 +262,7 @@ async function proxyTarball(c: Context, token: string, ref: TarballRef): Promise
 		return c.redirect(location, redirectStatus(upstream.status))
 	}
 
-	if (!upstream.ok) return c.json({ error: 'upstream_error' }, upstream.status as 502)
+	if (!upstream.ok) return c.json({ error: 'upstream_error' }, clientErrorStatus(upstream.status) as 502)
 
 	if (c.req.method === 'HEAD') return c.body(null, 200)
 
