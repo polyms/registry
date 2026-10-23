@@ -24,7 +24,7 @@ Tauri’s updater reads `GET /<app-name>/latest.json`, which returns the `latest
 
 ## npm
 
-`GET /npm` proxies GitHub Packages for every name in `PACKAGES`. The consumer does not send a token. The server uses `TOKEN` (GitHub `read:packages`), then rewrites each tarball URL back through this host. A tarball request redirects to GitHub’s signed download URL.
+`GET /npm/<name>` proxies the GitHub Packages packument for every name in `PACKAGES`. `GET /npm/<name>/<version>` returns one manifest: `<version>` is a SemVer (`1.2.3`) or a dist-tag (`latest`). The consumer does not send a token. The server uses `TOKEN` (GitHub `read:packages`), then rewrites each tarball URL back through this host. A tarball request redirects to GitHub’s signed download URL.
 
 ```ini
 @polyms:registry=https://registry.polyms.dev/npm

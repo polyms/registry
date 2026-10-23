@@ -6,9 +6,15 @@ const GITHUB_NPM = 'https://npm.pkg.github.com'
 const TARBALL_PREFIX = `${GITHUB_NPM}/download/`
 const repoConfigKeys = ['bugs', 'directories', 'funding', 'homepage', 'repository'] as const
 
-type Packument = {
-	versions?: Record<string, { dist?: { tarball?: string } }>
+type VersionDoc = {
+	dist?: { tarball?: string }
 }
+
+type Packument = {
+	versions?: Record<string, VersionDoc>
+}
+
+type NpmDocument = Packument & VersionDoc
 
 type TarballRef = {
 	id: string
@@ -16,7 +22,10 @@ type TarballRef = {
 	version: string
 }
 
-type NpmPath = { kind: 'packument'; name: string } | { kind: 'tarball'; ref: TarballRef }
+type NpmPath =
+	| { kind: 'manifest'; name: string; spec: string }
+	| { kind: 'packument'; name: string }
+	| { kind: 'tarball'; ref: TarballRef }
 
 function stripRepoConfig(record: object) {
 	const target = record as Record<string, unknown>
@@ -57,6 +66,27 @@ function samePackageTarball(raw: string, name: string, token?: string) {
 	return null
 }
 
+function rewriteVersion<T extends VersionDoc>(version: T, origin: string, name: string, token?: string): T {
+	stripRepoConfig(version)
+
+	const dist = version.dist
+	if (!dist?.tarball) return version
+
+	const cleaned = samePackageTarball(dist.tarball, name, token)
+	if (!cleaned) {
+		delete dist.tarball
+		return version
+	}
+
+	if (!cleaned.startsWith(TARBALL_PREFIX)) {
+		dist.tarball = cleaned
+		return version
+	}
+
+	dist.tarball = `${origin}/npm/download/${cleaned.slice(TARBALL_PREFIX.length)}`
+	return version
+}
+
 export function rewritePackument(
 	packument: Packument,
 	origin: string,
@@ -68,31 +98,28 @@ export function rewritePackument(
 	const versions = packument.versions
 	if (!versions) return packument
 
-	for (const version of Object.values(versions)) {
-		stripRepoConfig(version)
-
-		const dist = version.dist
-		if (!dist?.tarball) continue
-
-		const cleaned = samePackageTarball(dist.tarball, name, token)
-		if (!cleaned) {
-			delete dist.tarball
-			continue
-		}
-
-		if (!cleaned.startsWith(TARBALL_PREFIX)) {
-			dist.tarball = cleaned
-			continue
-		}
-
-		dist.tarball = `${origin}/npm/download/${cleaned.slice(TARBALL_PREFIX.length)}`
-	}
+	for (const version of Object.values(versions)) rewriteVersion(version, origin, name, token)
 
 	return packument
 }
 
+export function rewriteManifest(
+	document: NpmDocument,
+	origin: string,
+	name: string,
+	token?: string
+): NpmDocument {
+	if (document.versions) return rewritePackument(document, origin, name, token)
+
+	return rewriteVersion(document, origin, name, token)
+}
+
 function isSafeSegment(value: string): boolean {
 	return value.length > 0 && value.length < 256 && !value.includes('..') && !value.includes('\\')
+}
+
+function isVersionSpec(value: string): boolean {
+	return isSafeSegment(value) && /^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(value)
 }
 
 function parseNpmPath(pathname: string, allowed: Set<string>): NpmPath | null {
@@ -123,21 +150,28 @@ function parseNpmPath(pathname: string, allowed: Set<string>): NpmPath | null {
 	}
 
 	const parts = rest.split('/')
-	if (parts.length !== 2) return null
+	if (parts.length !== 2 && parts.length !== 3) return null
 
-	const [scope, pkg] = parts
+	const [scope, pkg, spec] = parts
 	if (!scope?.startsWith('@') || !pkg) return null
 	if (!isSafeSegment(scope) || !isSafeSegment(pkg)) return null
 
 	const name = `${scope}/${pkg}`
 	if (!allowed.has(name)) return null
 
-	return { kind: 'packument', name }
+	if (spec === undefined) return { kind: 'packument', name }
+	if (!isVersionSpec(spec)) return null
+
+	return { kind: 'manifest', name, spec }
 }
 
 function upstreamPackumentUrl(name: string): string {
 	const slash = name.indexOf('/')
 	return `${GITHUB_NPM}/${name.slice(0, slash)}%2F${name.slice(slash + 1)}`
+}
+
+function upstreamManifestUrl(name: string, spec: string): string {
+	return `${upstreamPackumentUrl(name)}/${encodeURIComponent(spec)}`
 }
 
 function upstreamTarballUrl(ref: TarballRef): string {
@@ -171,8 +205,12 @@ function assertNpmUrl(raw: string) {
 	if (parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Refused npm URL')
 }
 
-async function proxyPackument(c: Context, token: string, name: string): Promise<Response> {
-	const upstreamUrl = upstreamPackumentUrl(name)
+async function proxyDocument(
+	c: Context,
+	token: string,
+	upstreamUrl: string,
+	rewrite: (document: NpmDocument, origin: string) => NpmDocument
+): Promise<Response> {
 	assertNpmUrl(upstreamUrl)
 
 	const upstream = await fetch(upstreamUrl, {
@@ -189,15 +227,15 @@ async function proxyPackument(c: Context, token: string, name: string): Promise<
 
 	if (!upstream.ok) return c.json({ error: 'upstream_error' }, upstream.status as 502)
 
-	let packument: Packument
+	let document: NpmDocument
 	try {
-		packument = (await upstream.json()) as Packument
+		document = (await upstream.json()) as NpmDocument
 	} catch {
 		return c.json({ error: 'upstream_error' }, 502)
 	}
 
 	const origin = new URL(c.req.url).origin
-	const rewritten = rewritePackument(packument, origin, name, token)
+	const rewritten = rewrite(document, origin)
 	if (containsToken(JSON.stringify(rewritten), token)) return c.json({ error: 'upstream_error' }, 502)
 
 	return c.json(rewritten)
@@ -242,7 +280,18 @@ export function mountNpmProxy(app: Hono<Env>, options: { packages: string[]; tok
 		const parsed = parseNpmPath(c.req.path, allowed)
 		if (!parsed) return c.text('Not found', 404)
 
-		if (parsed.kind === 'packument') return proxyPackument(c, token, parsed.name)
+		if (parsed.kind === 'packument') {
+			return proxyDocument(c, token, upstreamPackumentUrl(parsed.name), (document, origin) =>
+				rewritePackument(document, origin, parsed.name, token)
+			)
+		}
+
+		if (parsed.kind === 'manifest') {
+			return proxyDocument(c, token, upstreamManifestUrl(parsed.name, parsed.spec), (document, origin) =>
+				rewriteManifest(document, origin, parsed.name, token)
+			)
+		}
+
 		return proxyTarball(c, token, parsed.ref)
 	})
 }

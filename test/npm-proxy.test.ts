@@ -90,6 +90,87 @@ describe('npm proxy', () => {
 		expect(calledUrl).not.toContain(token)
 	})
 
+	it('proxies a dist-tag manifest and rewrites its tarball', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					dist: {
+						integrity: 'sha512-abc',
+						tarball: 'https://npm.pkg.github.com/download/@polyms/ui-kit/1.2.3/abc',
+					},
+					name: '@polyms/ui-kit',
+					repository: { url: 'https://github.com/polyms/ui-kit' },
+					version: '1.2.3',
+				}),
+				{ headers: { 'content-type': 'application/json' }, status: 200 }
+			)
+		)
+		vi.stubGlobal('fetch', fetchMock)
+
+		const app = appWithToken()
+		const response = await app.request('http://localhost:3000/npm/@polyms%2fui-kit/latest', {
+			headers: { Accept: 'application/json' },
+		})
+		const body = (await response.json()) as {
+			dist: { integrity?: string; tarball: string }
+			repository?: unknown
+			version: string
+		}
+
+		expect(response.status).toBe(200)
+		expect(body.version).toBe('1.2.3')
+		expect(body.dist.tarball).toBe('http://localhost:3000/npm/download/@polyms/ui-kit/1.2.3/abc')
+		expect(body.dist.integrity).toBe('sha512-abc')
+		expect(body.repository).toBeUndefined()
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://npm.pkg.github.com/@polyms%2Fui-kit/latest',
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Accept: 'application/json',
+					Authorization: `Bearer ${token}`,
+				}),
+				method: 'GET',
+				redirect: 'manual',
+			})
+		)
+	})
+
+	it('proxies an exact version manifest', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ name: '@polyms/ui-kit', version: '1.2.3-beta.1' }), {
+				headers: { 'content-type': 'application/json' },
+				status: 200,
+			})
+		)
+		vi.stubGlobal('fetch', fetchMock)
+
+		const app = appWithToken()
+		const response = await app.request('http://localhost:3000/npm/@polyms/ui-kit/1.2.3-beta.1')
+		const body = (await response.json()) as { version: string }
+
+		expect(response.status).toBe(200)
+		expect(body.version).toBe('1.2.3-beta.1')
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://npm.pkg.github.com/@polyms%2Fui-kit/1.2.3-beta.1',
+			expect.anything()
+		)
+	})
+
+	it('returns 404 for a version outside the allowlist or an unsafe spec', async () => {
+		const fetchMock = vi.fn()
+		vi.stubGlobal('fetch', fetchMock)
+
+		const app = appWithToken()
+		const outside = await app.request('http://localhost:3000/npm/@polyms/icons/latest')
+		const unsafe = await app.request('http://localhost:3000/npm/@polyms/ui-kit/..')
+		const extra = await app.request('http://localhost:3000/npm/@polyms/ui-kit/latest/extra')
+
+		expect(outside.status).toBe(404)
+		expect(unsafe.status).toBe(404)
+		expect(extra.status).toBe(404)
+		expect(fetchMock).not.toHaveBeenCalled()
+	})
+
 	it('accepts an unencoded package path', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(packumentResponse())
 		vi.stubGlobal('fetch', fetchMock)
