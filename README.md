@@ -1,108 +1,137 @@
-# Hazel
+# Polyms Registry
 
-[![CircleCI](https://circleci.com/gh/vercel/hazel/tree/master.svg?style=svg)](https://circleci.com/gh/vercel/hazel/tree/master)
-[![XO code style](https://img.shields.io/badge/code_style-XO-5ed9c7.svg)](https://github.com/sindresorhus/xo)
+Update server for desktop apps. It reads [GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases), caches them in memory, and serves download pages plus updater feeds. One [Hono](https://hono.dev) app, deployed as a Vercel function (`src/index.ts`).
 
-This project lets you deploy an update server for [Electron](https://www.electronjs.org) apps with ease: You only need to click a button.
+Downloads redirect to the GitHub asset. With a token, private assets are fetched through the GitHub API and the client is redirected to the signed URL.
 
-The result will be faster and more lightweight than any other solution out there! :rocket:
+## Setup
 
-- Recommended by Electron [here](https://www.electronjs.org/docs/tutorial/updates#deploying-an-update-server)
-- Built on top of [Hono](https://hono.dev), running as one Vercel function
-- Pulls the latest release data from [GitHub Releases](https://help.github.com/articles/creating-releases/) and caches it in memory
-- Refreshes the cache every **15 minutes** (custom interval [possible](#options))
-- When asked for an update, it returns the link to the GitHub asset directly (saves bandwidth)
-- Supports **macOS** and **Windows** apps
-- Scales infinitely on [Vercel](https://vercel.com) Serverless Functions
+Set `ACCOUNT` and `APPS` to the GitHub owner and the repository names that publish the apps, then deploy on Vercel (or run `vercel dev` locally).
 
-## Usage
-
-Open this link in a new tab to deploy Hazel on [Vercel](https://vercel.com):
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fhazel&env=ACCOUNT,REPOSITORY&envDescription=Enter%20your%20GitHub%20user%2Forg%20slug%20and%20the%20name%20of%20the%20repository%20that%20contains%20your%20Electron%20app.&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Fhazel%23usage&repo-name=hazel-update-server)
-
-Once it's deployed, paste the deployment address into your code (please keep in mind that updates should only occur in the production version of the app, not while developing):
+Point the updater at the deployment:
 
 ```js
 const { app, autoUpdater } = require('electron')
 
-const server = <your-deployment-url>
-const url = `${server}/update/${process.platform}/${app.getVersion()}`
+const server = '<your-deployment-url>'
+const name = '<app-name>'
+const url = `${server}/${name}/update/${process.platform}/${app.getVersion()}`
 
 autoUpdater.setFeedURL({ url })
 ```
 
-That's it! :white_check_mark:
+Tauri’s updater reads `GET /<app-name>/latest.json`, which returns the `latest.json` asset from that app’s latest GitHub release.
 
-From now on, the auto updater will ask your Hazel deployment for updates!
+## npm
 
-## Options
+`GET /npm` proxies GitHub Packages for every name in `PACKAGES`. The consumer does not send a token. The server uses `TOKEN` (GitHub `read:packages`), then rewrites each tarball URL back through this host. A tarball request redirects to GitHub’s signed download URL.
 
-The following environment variables can be used optionally:
+```ini
+@polyms:registry=https://registry.polyms.dev/npm
+```
 
-- `INTERVAL`: Refreshes the cache every x minutes ([restrictions](https://developer.github.com/changes/2012-10-14-rate-limit-changes/)) (defaults to 15 minutes)
-- `PRE`: When defined with a value of `1`, only pre-releases will be cached
-- `TOKEN`: Your GitHub token (for private repos)
-- `URL`: The server's URL (for private repos - when running on [Vercel](https://vercel.com), this field is filled with the URL of the deployment automatically)
+```bash
+pnpm add @polyms/ui-kit
+```
 
-## Statistics
+## Environment
 
-Since Hazel routes all the traffic for downloading the actual application files to [GitHub Releases](https://help.github.com/articles/creating-releases/), you can use their API to determine the download count for a certain release.
+| Variable     | Required           | Purpose                                                                                                              |
+| ------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `ACCOUNT`    | yes                | GitHub user or org                                                                                                   |
+| `APPS`       | yes                | Comma-separated repository names under `ACCOUNT`, such as `studio` or `studio,other`. At least one name is required. |
+| `INTERVAL`   | no                 | Cache lifetime in minutes. Default `15`                                                                              |
+| `PACKAGES`   | no                 | Comma-separated npm names, such as `@polyms/ui-kit`. Default `@polyms/ui-kit`                                        |
+| `PRE`        | no                 | Any non-empty value caches pre-releases only. Unset caches stable releases only                                      |
+| `TOKEN`      | private repos, npm | GitHub token for private release downloads and the npm proxy (`read:packages`)                                       |
+| `PUBLIC_URL` | private repos      | Public base URL written into update payloads. Falls back to `VERCEL_URL`, then `URL`                                 |
 
-As an example, check out the [latest Hyper release](https://api.github.com/repos/vercel/hyper/releases/latest) and search for `mac.zip`. You'll find a release containing a sub property named `download_count` with the amount of downloads as its value.
+`TOKEN` without a base URL fails at startup (`PUBLIC_URL`, `VERCEL_URL`, or `URL` must be set). Draft releases are ignored. The release list requests up to 100 releases.
 
 ## Routes
 
-### /
+### `GET /`
 
-Displays an overview page showing the cached repository with the different available platforms and file sizes. Links to the repo, releases, specific cached version and direct downloads for each platform are present.
+Overview of each app's cached latest release, in list order: version, notes, and a download link per detected platform. Every app links to `/{app}/download/{platform}`.
 
-### /download
+### `GET /:name/releases`
 
-Automatically detects the platform/OS of the visitor by parsing the user agent and then downloads the appropriate copy of your application.
+Release history for one product. Each app is `/:name/releases`, with a title-cased heading. File links on that page are `/{app}/download/{version}/{file}`. Each npm name in `PACKAGES` is `/{package}/releases`, using the name after the scope. Tags are read from `{ACCOUNT}/{package}` with the prefix `{package}@`. The same page renders both. An app name wins when it is also a package slug.
 
-If the latest version of the application wasn't yet pulled from [GitHub Releases](https://help.github.com/articles/creating-releases/), it will return a message and the status code `404`. The same happens if the latest release doesn't contain a file for the detected platform.
+Each app name below is one repository from `APPS`. Unknown names → `404`. There is no unscoped `/download`, `/latest.json`, or `/update` alias.
 
-### /download/:platform
+### `GET /:app/latest.json`
 
-Accepts a platform (like "darwin" or "win32") to download the appropriate copy your app for. I generally suggest using either `process.platform` ([more](https://nodejs.org/api/process.html#process_process_platform)) or `os.platform()` ([more](https://nodejs.org/api/os.html#os_os_platform)) to retrieve this string.
+Fetches `latest.json` from that app’s latest GitHub release (Tauri updater). In private mode, platform URLs that point at `github.com/<account>/<app>/releases` are rewritten to `{base}/{app}`. `500` when the release or the asset cannot be read.
 
-If the cache isn't filled yet or doesn't contain a download link for the specified platform, it will respond like `/`.
+### `GET /:app/download`
 
-### /update/:platform/:version
+Picks a platform from the `User-Agent`, then redirects to that app’s asset.
 
-Checks if there is an update available by reading from the cache.
+- Mac desktop → `dmg` (`darwin` when `?update` is set)
+- Windows desktop → `exe`
+- iPhone, iPad, and anything else → `404`
 
-If the latest version of the application wasn't yet pulled from [GitHub Releases](https://help.github.com/articles/creating-releases/), it will return the `204` status code. The same happens if the latest release doesn't contain a file for the specified platform.
+### `GET /:app/download/:platform`
 
-### /update/win32/:version/RELEASES
+Redirects to the cached asset for a platform key or alias. `mac` and `mac_arm64` map to `dmg` / `dmg_arm64` unless `?update` is set. Unknown platform → `500`. No asset → `404`.
 
-This endpoint was specifically crafted for the Windows platform (called "win32" [in Node.js](https://nodejs.org/api/process.html#process_process_platform)).
+### `GET /:app/download/:version/:file`
 
-Since the [Windows version](https://github.com/Squirrel/Squirrel.Windows) of Squirrel (the software that powers auto updates inside [Electron](https://www.electronjs.org)) requires access to a file named "RELEASES" when checking for updates, this endpoint will respond with a cached version of the file that contains a download link to a `.nupkg` file (the application update).
+Redirects to one asset on a tagged release of that app. `:version` must look like `v1` (`v` plus digits). Missing release or asset → `404`.
 
-## Programmatic Usage
+### `GET /:app/update/:platform/:version`
 
-You can add Hazel to an existing HTTP server, if you want. For example, this will allow you to implement custom analytics on certain paths.
+Electron auto-updater check for that app. `:version` must be SemVer and `:platform` must resolve to a known alias.
 
-```js
-import { createApp } from './src/app.ts'
+- `204` when that platform has no asset, or the cached version equals `:version`
+- JSON `{ name, notes, pub_date, url }` when an update is available
+- `500` JSON (`version_invalid` or `invalid_platform`) when the inputs do not resolve
 
-const app = createApp({ account, repository })
+In private mode, `url` is `{base}/{app}/download/{platform}?update=true`. Otherwise it is the GitHub asset URL.
 
-export default app
+### `GET /:app/update/win32/:version/RELEASES`
+
+Squirrel.Windows `RELEASES` body from that app’s cached release, with `.nupkg` names rewritten to absolute asset URLs. `204` when that file was not cached. This route is registered before `/:app/update/:platform/:version`.
+
+## Platforms
+
+An asset is cached when its filename matches one of these. `arm64` or `aarch64` in the name stores it as `<platform>_arm64`.
+
+| Platform   | Filename                                     |
+| ---------- | -------------------------------------------- |
+| `dmg`      | `.dmg`                                       |
+| `exe`      | `.exe`                                       |
+| `deb`      | `.deb`                                       |
+| `rpm`      | `.rpm`                                       |
+| `AppImage` | `.AppImage`                                  |
+| `darwin`   | `.zip` whose name contains `mac` or `darwin` |
+| `tar.gz`   | `.tar.gz`                                    |
+
+Aliases accepted by `/:app/download/:platform` and `/:app/update/:platform/:version` (each also has an `_arm64` form):
+
+| Platform   | Aliases                   |
+| ---------- | ------------------------- |
+| `darwin`   | `mac`, `macos`, `osx`     |
+| `exe`      | `win32`, `windows`, `win` |
+| `deb`      | `debian`                  |
+| `rpm`      | `fedora`                  |
+| `AppImage` | `appimage`                |
+| `dmg`      | `dmg`                     |
+| `tar.gz`   | `targz`, `tarball`        |
+
+## Development
+
+[pnpm](https://pnpm.io) `12`. [Vercel CLI](https://vercel.com/docs/cli) for the local server.
+
+```sh
+pnpm install
+vercel dev
 ```
 
-## Contributing
+```sh
+pnpm test    # biome lint, then vitest
+pnpm check   # biome check and prettier
+```
 
-1. [Fork](https://help.github.com/articles/fork-a-repo/) this repository to your own GitHub account and then [clone](https://help.github.com/articles/cloning-a-repository/) it to your local device
-2. Move into the directory of your clone: `cd hazel`
-3. Install [Vercel CLI](https://vercel.com/cli) and run the development server: `vercel dev`
-
-## Credits
-
-Huge thanks to my ([@leo](https://github.com/leo)'s) friend [Andy](http://twitter.com/andybitz_), who suggested the name "Hazel" (since the auto updater software inside [Electron](https://www.electronjs.org) is called "Squirrel") and [Matheus](https://twitter.com/matheusfrndes) for collecting ideas with me.
-
-## Author
-
-Leo Lamprecht ([@leo](https://x.com/leo)) - [Vercel](https://vercel.com)
+`createApp` from `src/app.ts` builds the Hono app from the same config object (`account`, `apps`, `packages`, `interval`, `pre`, `token`, `url`). `apps` is required and must contain at least one repository name.

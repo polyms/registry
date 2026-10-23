@@ -30,6 +30,18 @@ export type LatestCache = {
 	version?: string
 }
 
+export type ListedFile = {
+	name: string
+	platform: string
+	size: number
+}
+
+export type ListedRelease = {
+	files: ListedFile[]
+	publishedAt?: string
+	version: string
+}
+
 type GitHubAsset = {
 	browser_download_url: string
 	content_type: string
@@ -51,6 +63,7 @@ export default class Cache {
 	config: CacheConfig
 	latest: LatestCache = {}
 	lastUpdate: number | null = null
+	releases: ListedRelease[] = []
 
 	constructor(config: CacheConfig) {
 		const { account, repository, token, url } = config
@@ -134,10 +147,24 @@ export default class Cache {
 
 		if (!Array.isArray(data) || data.length === 0) return
 
-		const release = data.find(item => {
+		const visible = data.filter(item => {
 			const isPre = Boolean(pre) === Boolean(item.prerelease)
 			return !item.draft && isPre
 		})
+
+		this.releases = visible.flatMap(item => {
+			if (!item.tag_name) return []
+
+			return [
+				{
+					files: filesForRelease(item),
+					publishedAt: item.published_at,
+					version: item.tag_name,
+				},
+			]
+		})
+
+		const release = visible[0]
 
 		if (!release?.assets || !Array.isArray(release.assets)) return
 
@@ -201,4 +228,27 @@ export default class Cache {
 
 		return { ...this.latest }
 	}
+
+	async loadReleases() {
+		await this.loadCache()
+
+		return this.releases
+	}
+}
+
+function filesForRelease(release: GitHubRelease): ListedFile[] {
+	const files: ListedFile[] = []
+
+	for (const asset of release.assets ?? []) {
+		const platform = checkPlatform(asset.name)
+		if (!platform) continue
+
+		files.push({
+			name: asset.name,
+			platform,
+			size: Math.round((asset.size / 1000000) * 10) / 10,
+		})
+	}
+
+	return files
 }

@@ -1,15 +1,17 @@
 import type { Hono } from 'hono'
 
-import { createApp } from './app.js'
+import { createApp, parseAppNames } from './app.js'
+import { parsePackageNames } from './package-catalog.js'
 
 export type { Hono }
 
 const {
 	INTERVAL: interval,
 	ACCOUNT: account,
-	REPOSITORY: repository,
+	APPS,
 	PRE: pre,
 	TOKEN: token,
+	PACKAGES,
 	URL: privateBaseUrl,
 	VERCEL_URL,
 	PUBLIC_URL,
@@ -19,9 +21,10 @@ const url = PUBLIC_URL || VERCEL_URL || privateBaseUrl
 
 const app = createApp({
 	account,
+	apps: parseAppNames(APPS),
 	interval,
+	packages: parsePackageNames(PACKAGES),
 	pre,
-	repository,
 	token,
 	url,
 })
