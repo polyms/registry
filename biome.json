@@ -1,37 +1,219 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
-  "vcs": {
-    "enabled": true,
-    "clientKind": "git",
-    "useIgnoreFile": true
-  },
-  "files": {
-    "ignoreUnknown": true,
-    "includes": ["**", "!pnpm-lock.yaml", "!coverage"]
-  },
-  "formatter": {
-    "enabled": true,
-    "indentStyle": "space",
-    "indentWidth": 2
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "preset": "recommended"
-    }
-  },
-  "javascript": {
-    "formatter": {
-      "quoteStyle": "single",
-      "semicolons": "always"
-    }
-  },
-  "assist": {
-    "enabled": true,
-    "actions": {
-      "source": {
-        "organizeImports": "on"
-      }
-    }
-  }
+	"$schema": "node_modules/@biomejs/biome/configuration_schema.json",
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on",
+				"useSortedAttributes": "on",
+				"useSortedKeys": "on",
+				"useSortedProperties": "on"
+			}
+		},
+		"enabled": true,
+		"includes": [
+			"**/*.{js,mjs,jsx,ts,mts,tsx,json,css,svg,html,webmanifest}",
+			".vscode/settings.json",
+			"biome.json",
+			"!**/tsconfig*",
+			"!**/package.json",
+			"!**/project.json",
+			"!**/nx.json"
+		]
+	},
+	"css": {
+		"assist": { "enabled": false },
+		"formatter": {
+			"enabled": true,
+			"indentWidth": 2,
+			"quoteStyle": "single"
+		},
+		"linter": { "enabled": false },
+		"parser": {
+			"tailwindDirectives": true
+		}
+	},
+	"files": {
+		"includes": [
+			"**/*.{js,mjs,jsx,ts,mts,tsx,json,css,svg,html,webmanifest}",
+			"!**/_root.css",
+			"!**/routeTree.gen.ts",
+			"!**/.nx",
+			"!**/.tanstack",
+			"!**/node_modules",
+			"!**/.pnpm-store",
+			"!**/.venv-rembg",
+			"!**/.agents/skills",
+			"!**/build",
+			"!**/dist"
+		]
+	},
+	"formatter": {
+		"attributePosition": "auto",
+		"bracketSameLine": true,
+		"bracketSpacing": true,
+		"enabled": true,
+		"expand": "auto",
+		"formatWithErrors": false,
+		"indentStyle": "tab",
+		"indentWidth": 2,
+		"lineEnding": "lf",
+		"lineWidth": 110
+	},
+	"html": {
+		"formatter": {
+			"attributePosition": "auto",
+			"bracketSameLine": true,
+			"enabled": true,
+			"indentScriptAndStyle": true,
+			"indentStyle": "tab",
+			"indentWidth": 2,
+			"lineEnding": "lf",
+			"lineWidth": 110,
+			"whitespaceSensitivity": "css"
+		},
+		"parser": {
+			"interpolation": true
+		}
+	},
+	"javascript": {
+		"experimentalEmbeddedSnippetsEnabled": true,
+		"formatter": {
+			"arrowParentheses": "asNeeded",
+			"bracketSameLine": false,
+			"bracketSpacing": true,
+			"jsxQuoteStyle": "single",
+			"quoteProperties": "asNeeded",
+			"quoteStyle": "single",
+			"semicolons": "asNeeded",
+			"trailingCommas": "es5"
+		}
+	},
+	"json": {
+		"formatter": {
+			"enabled": true,
+			"indentWidth": 2,
+			"lineWidth": 110
+		}
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"a11y": {
+				"noSvgWithoutTitle": "off",
+				"preset": "recommended",
+				"useKeyWithClickEvents": "error",
+				"useValidAnchor": "error"
+			},
+			"complexity": {
+				"noForEach": "off",
+				"noImportantStyles": "off",
+				"useOptionalChain": "error"
+			},
+			"correctness": {
+				"noUndeclaredVariables": "error",
+				"noUnusedImports": "warn",
+				"noUnusedVariables": "warn",
+				"useExhaustiveDependencies": "off",
+				"useParseIntRadix": "off"
+			},
+			"nursery": {
+				"useTailwindSortedClasses": "error"
+			},
+			"preset": "recommended",
+			"security": {
+				"noDangerouslySetInnerHtml": "off"
+			},
+			"style": {
+				"noDescendingSpecificity": "off",
+				"noNonNullAssertion": "off",
+				"noUnusedTemplateLiteral": "warn",
+				"useBlockStatements": "off",
+				"useConsistentArrayType": "error",
+				"useShorthandFunctionType": "error",
+				"useTemplate": "warn"
+			},
+			"suspicious": {
+				"noArrayIndexKey": "warn",
+				"noEmptyBlockStatements": "error",
+				"noExplicitAny": "warn",
+				"noUnknownAtRules": "off"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"assist": {
+				"actions": {
+					"source": {
+						"useSortedKeys": "off"
+					}
+				}
+			},
+			"includes": ["**/*.ts"]
+		},
+		{
+			"assist": {
+				"actions": {
+					"source": {
+						"useSortedKeys": "off"
+					}
+				}
+			},
+			"includes": ["**/*.tsx", "**/*.jsx"],
+			"linter": {
+				"rules": {
+					"a11y": {
+						"useAltText": "error",
+						"useButtonType": "error"
+					},
+					"style": {
+						"useNamingConvention": {
+							"level": "error",
+							"options": {
+								"conventions": [],
+								"requireAscii": true,
+								"strictCase": false
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"**/*.test.js",
+				"**/*.test.ts",
+				"**/*.test.tsx",
+				"**/*.spec.js",
+				"**/*.spec.ts",
+				"**/*.spec.tsx"
+			],
+			"javascript": {
+				"globals": ["afterAll", "afterEach", "beforeAll", "beforeEach", "describe", "expect", "it", "test"]
+			},
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": ["**/*.d.ts"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnusedVariables": "off"
+					}
+				}
+			}
+		}
+	],
+	"vcs": {
+		"clientKind": "git",
+		"defaultBranch": "main",
+		"enabled": true,
+		"useIgnoreFile": true
+	}
 }

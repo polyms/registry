@@ -89,7 +89,7 @@ You can add Hazel to an existing HTTP server, if you want. For example, this wil
 const hazel = require('hazel-server')
 
 http.createServer((req, res) => {
-  hazel(req, res)
+	hazel(req, res)
 })
 ```
 

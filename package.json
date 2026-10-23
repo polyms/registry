@@ -1,51 +1,52 @@
 {
-  "name": "@polyms/registry",
-  "version": "5.1.1",
-  "description": "Polyms Registry — update feed for Flutter and Tauri apps, and a proxy for the GitHub npm registry",
-  "author": "Polyms",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/polyms/registry.git"
-  },
-  "homepage": "https://github.com/polyms/registry#readme",
-  "bugs": {
-    "url": "https://github.com/polyms/registry/issues"
-  },
-  "main": "lib/index.js",
-  "scripts": {
-    "dev": "npx vercel dev",
-    "lint": "biome lint .",
-    "format": "biome format --write .",
-    "check": "biome check .",
-    "test": "biome lint . && jest",
-    "precommit": "lint-staged"
-  },
-  "lint-staged": {
-    "*.{js,json,md}": [
-      "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true"
-    ]
-  },
-  "dependencies": {
-    "async-retry": "1.2.3",
-    "date-fns": "1.29.0",
-    "express-useragent": "1.0.12",
-    "fetch": "1.1.0",
-    "finalhandler": "1.1.0",
-    "handlebars": "4.0.11",
-    "jest": "24.0.0",
-    "micro": "9.3.3",
-    "ms": "2.1.1",
-    "node-fetch": "2.0.0",
-    "router": "1.3.2",
-    "semver": "5.5.0",
-    "stream-to-string": "1.1.0",
-    "test-listen": "1.1.0"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.6.2",
-    "husky": "0.14.3",
-    "lint-staged": "7.0.0"
-  },
-  "packageManager": "pnpm@12.14.0+sha512.c18ba6d87993d3d164cb5e8948f32b2c06ee854487e06cd8d86781342fb3e5bb4634367034711e86802baa9c37bea906ce1929ad08d70884c97d801df13389a6"
+	"name": "@polyms/registry",
+	"version": "5.1.1",
+	"description": "Polyms Registry — update feed for Flutter and Tauri apps, and a proxy for the GitHub npm registry",
+	"author": "Polyms",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/polyms/registry.git"
+	},
+	"homepage": "https://github.com/polyms/registry#readme",
+	"bugs": {
+		"url": "https://github.com/polyms/registry/issues"
+	},
+	"type": "commonjs",
+	"main": "lib/index.js",
+	"scripts": {
+		"dev": "npx vercel dev",
+		"lint": "biome lint .",
+		"format": "biome format --write .",
+		"check": "biome check --write . && prettier -l --write .",
+		"test": "biome lint . && jest",
+		"precommit": "lint-staged"
+	},
+	"lint-staged": {
+		"*.{js,mjs,json,css,html}": ["biome check --write --no-errors-on-unmatched --files-ignore-unknown=true"],
+		"*.{md,yml,yaml}": ["prettier -l --write"]
+	},
+	"dependencies": {
+		"async-retry": "1.2.3",
+		"date-fns": "1.29.0",
+		"express-useragent": "1.0.12",
+		"fetch": "1.1.0",
+		"finalhandler": "1.1.0",
+		"handlebars": "4.0.11",
+		"jest": "24.0.0",
+		"micro": "9.3.3",
+		"ms": "2.1.1",
+		"node-fetch": "2.0.0",
+		"router": "1.3.2",
+		"semver": "5.5.0",
+		"stream-to-string": "1.1.0",
+		"test-listen": "1.1.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.6.2",
+		"husky": "0.14.3",
+		"lint-staged": "7.0.0",
+		"prettier": "~3.9.10"
+	},
+	"packageManager": "pnpm@12.14.0+sha512.c18ba6d87993d3d164cb5e8948f32b2c06ee854487e06cd8d86781342fb3e5bb4634367034711e86802baa9c37bea906ce1929ad08d70884c97d801df13389a6"
 }

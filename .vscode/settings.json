@@ -1,0 +1,28 @@
+{
+	"[javascript][javascriptreact][typescript][typescriptreact][css][html][json][jsonc]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[mdx][markdown][yaml]": {
+		"editor.defaultFormatter": "esbenp.prettier-vscode"
+	},
+	"biome.suggestInstallingGlobally": false,
+	"editor.codeActionsOnSave": {
+		"source.action.useSortedAttributes.biome": "explicit",
+		"source.action.useSortedProperties.biome": "explicit",
+		"source.fixAll.biome": "explicit",
+		"source.organizeImports.biome": "explicit"
+	},
+	"editor.defaultFormatter": "biomejs.biome",
+	"editor.formatOnSave": true,
+	"editor.insertSpaces": false,
+	"editor.quickSuggestions": {
+		"strings": "on"
+	},
+	"editor.tabSize": 2,
+	"editor.wordWrapColumn": 110,
+	"files.associations": {
+		"*.md": "markdown",
+		"*.mdx": "markdown"
+	},
+	"js/ts.preferences.quoteStyle": "single"
+}

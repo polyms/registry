@@ -1,0 +1,40 @@
+# Prettier: markdown, MDX, YAML. JS/TS/CSS/HTML/JSON → Biome.
+
+# Build / deps
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+.nx/
+tmp/
+out-tsc/
+doc_build/
+.tanstack/
+.agents/skills/
+
+# Lock / generated
+pnpm-lock.yaml
+skills-lock.json
+next-env.d.ts
+**/routeTree.gen.ts
+vite.config.*.timestamp*
+vitest.config.*.timestamp*
+
+# No Prettier parser
+*.mdc
+*.hbs
+
+# Biome handles these — Prettier skip
+*.js
+*.mjs
+*.cjs
+*.jsx
+*.ts
+*.mts
+*.tsx
+*.json
+*.jsonc
+*.css
+*.html
+*.svg
+*.webmanifest

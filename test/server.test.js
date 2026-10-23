@@ -5,20 +5,20 @@ const listen = require('test-listen')
 const initialEnv = Object.assign({}, process.env)
 
 afterEach(() => {
-  process.env = initialEnv
+	process.env = initialEnv
 })
 
 describe('Server', () => {
-  it('Should start without errors', async () => {
-    process.env = {
-      ACCOUNT: 'zeit',
-      REPOSITORY: 'hyper'
-    }
+	it('Should start without errors', async () => {
+		process.env = {
+			ACCOUNT: 'zeit',
+			REPOSITORY: 'hyper',
+		}
 
-    const run = require('../lib/server')
-    const server = micro(run)
+		const run = require('../lib/server')
+		const server = micro(run)
 
-    await listen(server)
-    server.close()
-  })
+		await listen(server)
+		server.close()
+	})
 })

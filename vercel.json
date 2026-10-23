@@ -1,23 +1,23 @@
 {
-    "rewrites": [
-        {
-            "source": "/favicon.ico",
-            "destination": "/public/favicon.ico"
-        },
-        {
-            "source": "/(.*)",
-            "destination": "/api"
-        }
-    ],
-    "headers": [
-        {
-            "source": "/public/(.*)",
-            "headers": [
-                {
-                    "key": "Cache-Control",
-                    "value": "public, max-age=2592000, immutable"
-                }
-            ]
-        }
-    ]
+	"headers": [
+		{
+			"headers": [
+				{
+					"key": "Cache-Control",
+					"value": "public, max-age=2592000, immutable"
+				}
+			],
+			"source": "/public/(.*)"
+		}
+	],
+	"rewrites": [
+		{
+			"destination": "/public/favicon.ico",
+			"source": "/favicon.ico"
+		},
+		{
+			"destination": "/api",
+			"source": "/(.*)"
+		}
+	]
 }
