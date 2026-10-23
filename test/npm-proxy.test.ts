@@ -90,17 +90,23 @@ describe('npm proxy', () => {
 		expect(calledUrl).not.toContain(token)
 	})
 
-	it('proxies a dist-tag manifest and rewrites its tarball', async () => {
+	it('reads a dist-tag from the packument and rewrites its tarball', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
 			new Response(
 				JSON.stringify({
-					dist: {
-						integrity: 'sha512-abc',
-						tarball: 'https://npm.pkg.github.com/download/@polyms/ui-kit/1.2.3/abc',
-					},
+					'dist-tags': { latest: '1.2.3' },
 					name: '@polyms/ui-kit',
-					repository: { url: 'https://github.com/polyms/ui-kit' },
-					version: '1.2.3',
+					versions: {
+						'1.2.3': {
+							dist: {
+								integrity: 'sha512-abc',
+								tarball: 'https://npm.pkg.github.com/download/@polyms/ui-kit/1.2.3/abc',
+							},
+							name: '@polyms/ui-kit',
+							repository: { url: 'https://github.com/polyms/ui-kit' },
+							version: '1.2.3',
+						},
+					},
 				}),
 				{ headers: { 'content-type': 'application/json' }, status: 200 }
 			)
@@ -123,7 +129,7 @@ describe('npm proxy', () => {
 		expect(body.dist.integrity).toBe('sha512-abc')
 		expect(body.repository).toBeUndefined()
 		expect(fetchMock).toHaveBeenCalledWith(
-			'https://npm.pkg.github.com/@polyms%2Fui-kit/latest',
+			'https://npm.pkg.github.com/@polyms%2Fui-kit',
 			expect.objectContaining({
 				headers: expect.objectContaining({
 					Accept: 'application/json',
@@ -135,12 +141,17 @@ describe('npm proxy', () => {
 		)
 	})
 
-	it('proxies an exact version manifest', async () => {
+	it('reads an exact version from the packument', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
-			new Response(JSON.stringify({ name: '@polyms/ui-kit', version: '1.2.3-beta.1' }), {
-				headers: { 'content-type': 'application/json' },
-				status: 200,
-			})
+			new Response(
+				JSON.stringify({
+					'dist-tags': { latest: '1.2.3' },
+					versions: {
+						'1.2.3-beta.1': { name: '@polyms/ui-kit', version: '1.2.3-beta.1' },
+					},
+				}),
+				{ headers: { 'content-type': 'application/json' }, status: 200 }
+			)
 		)
 		vi.stubGlobal('fetch', fetchMock)
 
@@ -150,10 +161,25 @@ describe('npm proxy', () => {
 
 		expect(response.status).toBe(200)
 		expect(body.version).toBe('1.2.3-beta.1')
-		expect(fetchMock).toHaveBeenCalledWith(
-			'https://npm.pkg.github.com/@polyms%2Fui-kit/1.2.3-beta.1',
-			expect.anything()
+		expect(fetchMock).toHaveBeenCalledOnce()
+		expect(fetchMock.mock.calls[0]?.[0]).toBe('https://npm.pkg.github.com/@polyms%2Fui-kit')
+	})
+
+	it('returns 404 when the packument has no such version', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ 'dist-tags': { latest: '1.2.3' }, versions: {} }), {
+				headers: { 'content-type': 'application/json' },
+				status: 200,
+			})
 		)
+		vi.stubGlobal('fetch', fetchMock)
+
+		const app = appWithToken()
+		const response = await app.request('http://localhost:3000/npm/@polyms/ui-kit/latest')
+		const body = (await response.json()) as { error: string }
+
+		expect(response.status).toBe(404)
+		expect(body.error).toBe('version_not_found')
 	})
 
 	it('returns 404 for a version outside the allowlist or an unsafe spec', async () => {
@@ -182,7 +208,7 @@ describe('npm proxy', () => {
 		expect(fetchMock).toHaveBeenCalledOnce()
 	})
 
-	it('hides an upstream 403 so clients are not told to send a token', async () => {
+	it('forwards an upstream 403 without the upstream body', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
 			new Response(JSON.stringify({ message: 'Permission denied' }), {
 				headers: { 'content-type': 'application/json' },
@@ -195,7 +221,7 @@ describe('npm proxy', () => {
 		const response = await app.request('http://localhost:3000/npm/@polyms/ui-kit')
 		const body = (await response.json()) as { error: string }
 
-		expect(response.status).toBe(502)
+		expect(response.status).toBe(403)
 		expect(body.error).toBe('upstream_error')
 		expect(JSON.stringify(body)).not.toContain('Permission denied')
 	})

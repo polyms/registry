@@ -11,10 +11,9 @@ type VersionDoc = {
 }
 
 type Packument = {
+	'dist-tags'?: Record<string, string>
 	versions?: Record<string, VersionDoc>
 }
-
-type NpmDocument = Packument & VersionDoc
 
 type TarballRef = {
 	id: string
@@ -103,17 +102,6 @@ export function rewritePackument(
 	return packument
 }
 
-export function rewriteManifest(
-	document: NpmDocument,
-	origin: string,
-	name: string,
-	token?: string
-): NpmDocument {
-	if (document.versions) return rewritePackument(document, origin, name, token)
-
-	return rewriteVersion(document, origin, name, token)
-}
-
 function isSafeSegment(value: string): boolean {
 	return value.length > 0 && value.length < 256 && !value.includes('..') && !value.includes('\\')
 }
@@ -170,10 +158,6 @@ function upstreamPackumentUrl(name: string): string {
 	return `${GITHUB_NPM}/${name.slice(0, slash)}%2F${name.slice(slash + 1)}`
 }
 
-function upstreamManifestUrl(name: string, spec: string): string {
-	return `${upstreamPackumentUrl(name)}/${encodeURIComponent(spec)}`
-}
-
 function upstreamTarballUrl(ref: TarballRef): string {
 	const slash = ref.name.indexOf('/')
 	const scope = ref.name.slice(0, slash)
@@ -197,9 +181,14 @@ function redirectStatus(status: number): 301 | 302 | 303 | 307 | 308 {
 	return 302
 }
 
-function clientErrorStatus(status: number): number {
-	if (status === 401 || status === 403) return 502
-	return status
+function selectVersion(packument: Packument, spec: string): VersionDoc | undefined {
+	const versions = packument.versions
+	if (!versions) return undefined
+
+	const tagged = packument['dist-tags']?.[spec]
+	if (tagged) return versions[tagged]
+
+	return versions[spec]
 }
 
 function assertNpmUrl(raw: string) {
@@ -210,12 +199,7 @@ function assertNpmUrl(raw: string) {
 	if (parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Refused npm URL')
 }
 
-async function proxyDocument(
-	c: Context,
-	token: string,
-	upstreamUrl: string,
-	rewrite: (document: NpmDocument, origin: string) => NpmDocument
-): Promise<Response> {
+async function readUpstream(c: Context, token: string, upstreamUrl: string): Promise<Packument | Response> {
 	assertNpmUrl(upstreamUrl)
 
 	const upstream = await fetch(upstreamUrl, {
@@ -224,23 +208,30 @@ async function proxyDocument(
 		redirect: 'manual',
 	})
 
-	if (c.req.method === 'HEAD') return c.body(null, clientErrorStatus(upstream.status) as 200)
+	if (c.req.method === 'HEAD') return c.body(null, upstream.status as 200)
 
 	if (upstream.status >= 300 && upstream.status < 400) {
 		return c.json({ error: 'upstream_error' }, 502)
 	}
 
-	if (!upstream.ok) return c.json({ error: 'upstream_error' }, clientErrorStatus(upstream.status) as 502)
+	if (!upstream.ok) return c.json({ error: 'upstream_error' }, upstream.status as 502)
 
-	let document: NpmDocument
 	try {
-		document = (await upstream.json()) as NpmDocument
+		return (await upstream.json()) as Packument
 	} catch {
 		return c.json({ error: 'upstream_error' }, 502)
 	}
+}
+
+async function proxyManifest(c: Context, token: string, name: string, spec: string): Promise<Response> {
+	const document = await readUpstream(c, token, upstreamPackumentUrl(name))
+	if (document instanceof Response) return document
+
+	const selected = selectVersion(document, spec)
+	if (!selected) return c.json({ error: 'version_not_found' }, 404)
 
 	const origin = new URL(c.req.url).origin
-	const rewritten = rewrite(document, origin)
+	const rewritten = rewriteVersion(selected, origin, name, token)
 	if (containsToken(JSON.stringify(rewritten), token)) return c.json({ error: 'upstream_error' }, 502)
 
 	return c.json(rewritten)
@@ -262,7 +253,7 @@ async function proxyTarball(c: Context, token: string, ref: TarballRef): Promise
 		return c.redirect(location, redirectStatus(upstream.status))
 	}
 
-	if (!upstream.ok) return c.json({ error: 'upstream_error' }, clientErrorStatus(upstream.status) as 502)
+	if (!upstream.ok) return c.json({ error: 'upstream_error' }, upstream.status as 502)
 
 	if (c.req.method === 'HEAD') return c.body(null, 200)
 
@@ -286,16 +277,17 @@ export function mountNpmProxy(app: Hono<Env>, options: { packages: string[]; tok
 		if (!parsed) return c.text('Not found', 404)
 
 		if (parsed.kind === 'packument') {
-			return proxyDocument(c, token, upstreamPackumentUrl(parsed.name), (document, origin) =>
-				rewritePackument(document, origin, parsed.name, token)
-			)
+			const document = await readUpstream(c, token, upstreamPackumentUrl(parsed.name))
+			if (document instanceof Response) return document
+
+			const origin = new URL(c.req.url).origin
+			const rewritten = rewritePackument(document, origin, parsed.name, token)
+			if (containsToken(JSON.stringify(rewritten), token)) return c.json({ error: 'upstream_error' }, 502)
+
+			return c.json(rewritten)
 		}
 
-		if (parsed.kind === 'manifest') {
-			return proxyDocument(c, token, upstreamManifestUrl(parsed.name, parsed.spec), (document, origin) =>
-				rewriteManifest(document, origin, parsed.name, token)
-			)
-		}
+		if (parsed.kind === 'manifest') return proxyManifest(c, token, parsed.name, parsed.spec)
 
 		return proxyTarball(c, token, parsed.ref)
 	})

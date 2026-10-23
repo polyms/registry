@@ -24,7 +24,7 @@ Tauri’s updater reads `GET /<app-name>/latest.json`, which returns the `latest
 
 ## npm
 
-`GET /npm/<name>` proxies the GitHub Packages packument for every name in `PACKAGES`. `GET /npm/<name>/<version>` returns one manifest: `<version>` is a SemVer (`1.2.3`) or a dist-tag (`latest`). The consumer does not send a token. The server uses `TOKEN` (GitHub `read:packages`), then rewrites each tarball URL back through this host. A tarball request redirects to GitHub’s signed download URL.
+`GET /npm/<name>` proxies the GitHub Packages packument for every name in `PACKAGES`. `GET /npm/<name>/<version>` returns one manifest from that packument: `<version>` is a SemVer (`1.2.3`) or a dist-tag (`latest`). GitHub Packages answers `/{name}/{version}` with 405, so this host does not call that URL. The consumer does not send a token. The server uses `TOKEN` (GitHub `read:packages`), then rewrites each tarball URL back through this host. A tarball request redirects to GitHub’s signed download URL.
 
 ```ini
 @polyms:registry=https://registry.polyms.dev/npm
@@ -46,7 +46,7 @@ pnpm add @polyms/ui-kit
 | `TOKEN`      | private repos, npm | Classic personal access token (`ghp_`) with `read:packages`. Fine-grained `github_pat_` tokens are rejected by GitHub Packages |
 | `PUBLIC_URL` | private repos      | Public base URL written into update payloads. Falls back to `VERCEL_URL`, then `URL`                                           |
 
-`TOKEN` without a base URL fails at startup (`PUBLIC_URL`, `VERCEL_URL`, or `URL` must be set). The npm proxy needs a classic token: GitHub Packages returns 403 for a fine-grained `github_pat_` token, which this server answers as 502. Draft releases are ignored. The release list requests up to 100 releases.
+`TOKEN` without a base URL fails at startup (`PUBLIC_URL`, `VERCEL_URL`, or `URL` must be set). The npm proxy needs a classic token: GitHub Packages returns 403 for a fine-grained `github_pat_` token. Draft releases are ignored. The release list requests up to 100 releases.
 
 ## Routes
 
