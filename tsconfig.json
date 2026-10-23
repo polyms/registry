@@ -2,6 +2,8 @@
 	"compilerOptions": {
 		"allowSyntheticDefaultImports": true,
 		"esModuleInterop": true,
+		"jsx": "react-jsx",
+		"jsxImportSource": "hono/jsx",
 		"module": "nodenext",
 		"moduleResolution": "nodenext",
 		"noEmit": true,
@@ -10,5 +12,5 @@
 		"target": "es2022",
 		"types": ["node"]
 	},
-	"include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+	"include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "vitest.config.ts"]
 }

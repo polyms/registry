@@ -8,7 +8,7 @@ import semver from 'semver'
 import checkAlias from './aliases.js'
 import Cache, { type CacheConfig, type LatestCache } from './cache.js'
 import { downloadTarget } from './download-target.js'
-import { renderOverview } from './view.js'
+import { renderOverview } from './views/overview.js'
 
 const faviconSvg = 'https://polyms.dev/favicon/favicon.svg'
 
