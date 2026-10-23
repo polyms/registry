@@ -194,6 +194,97 @@ describe('Server', () => {
 		)
 	})
 
+	it('rewrites private latest.json asset api urls onto the installer file', async () => {
+		const installer = 'Polyms.Studio_0.2.12_universal.app.tar.gz'
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string) => {
+				const href = String(url)
+				if (href.endsWith('/repos/polyms/studio/releases/latest')) {
+					return Response.json({
+						assets: [
+							{
+								name: 'latest.json',
+								url: 'https://api.github.com/repos/polyms/studio/releases/assets/9',
+							},
+							{
+								name: installer,
+								url: 'https://api.github.com/repos/polyms/studio/releases/assets/659',
+							},
+							{
+								name: 'secret.env',
+								url: 'https://api.github.com/repos/polyms/studio/releases/assets/1',
+							},
+						],
+						tag_name: 'v0.2.12',
+					})
+				}
+				if (href.endsWith('/releases/assets/9')) {
+					return Response.json({
+						platforms: {
+							'darwin-aarch64': {
+								signature: 'sig',
+								url: 'https://api.github.com/repos/polyms/studio/releases/assets/659',
+							},
+							'darwin-x86_64': {
+								signature: 'sig',
+								url: 'https://api.github.com/repos/other/studio/releases/assets/659',
+							},
+							leak: {
+								signature: 'sig',
+								url: 'https://api.github.com/repos/polyms/studio/releases/assets/1',
+							},
+						},
+						version: '0.2.12',
+					})
+				}
+				if (href.endsWith('/repos/polyms/studio/releases/tags/v0.2.12')) {
+					return Response.json({
+						assets: [
+							{
+								name: installer,
+								url: 'https://api.github.com/repos/polyms/studio/releases/assets/659',
+							},
+						],
+					})
+				}
+				if (href.endsWith('/releases/assets/659')) {
+					return new Response(null, {
+						headers: {
+							location:
+								'https://release-assets.githubusercontent.com/github-production-release-asset/studio.tar.gz',
+						},
+						status: 302,
+					})
+				}
+				return new Response('missing', { status: 404 })
+			})
+		)
+
+		const app = createApp({
+			account: 'polyms',
+			apps: ['studio'],
+			packages: [],
+			token: 'test-token',
+			url: 'registry.polyms.dev',
+		})
+		const response = await app.request('http://localhost/studio/latest.json')
+		const body = (await response.json()) as {
+			platforms: Record<string, { signature?: string; url?: string }>
+		}
+		const download = await app.request(`http://localhost/studio/download/v0.2.12/${installer}`)
+
+		expect(response.status).toBe(200)
+		expect(body.platforms['darwin-aarch64']?.url).toBe(
+			`https://registry.polyms.dev/studio/download/v0.2.12/${installer}`
+		)
+		expect(body.platforms['darwin-x86_64']?.url).toBeUndefined()
+		expect(body.platforms.leak?.url).toBeUndefined()
+		expect(JSON.stringify(body)).not.toContain('api.github.com')
+		expect(download.status).toBe(302)
+		expect(download.headers.get('location')).toContain('githubusercontent.com')
+	})
+
 	it('parses app names and rejects an empty list', async () => {
 		expect(parseAppNames(undefined)).toEqual([])
 		expect(parseAppNames(' studio, other, studio, , ../secret, studio/../x')).toEqual(['studio', 'other'])

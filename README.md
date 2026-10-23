@@ -62,7 +62,7 @@ Each app name below is one repository from `APPS`. Unknown names → `404`. Ther
 
 ### `GET /:app/latest.json`
 
-Fetches `latest.json` from that app’s latest GitHub release (Tauri updater). In private mode, platform URLs that point at `github.com/<account>/<app>/releases` are rewritten to `{base}/{app}`. `500` when the release or the asset cannot be read.
+Fetches `latest.json` from that app’s latest GitHub release (Tauri updater). In private mode, platform URLs that point at `github.com/<account>/<app>/releases` or at that repo’s release asset API are rewritten to `{base}/{app}/download/{version}/{file}`. `500` when the release or the asset cannot be read.
 
 ### `GET /:app/download`
 

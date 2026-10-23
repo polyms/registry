@@ -211,7 +211,10 @@ function buildApp(
 
 			if (!releaseResponse.ok) throw new Error('Failed to fetch release info')
 
-			const releaseData = (await releaseResponse.json()) as { assets?: ReleaseAsset[] }
+			const releaseData = (await releaseResponse.json()) as {
+				assets?: ReleaseAsset[]
+				tag_name?: string
+			}
 			const latestJsonAsset = releaseData.assets?.find(asset => asset.name === 'latest.json')
 
 			if (!latestJsonAsset?.url) throw new Error('latest.json not found in release assets')
@@ -224,9 +227,11 @@ function buildApp(
 				(await response.json()) as Parameters<typeof sanitizeLatestJson>[0],
 				{
 					account,
+					assets: releaseData.assets,
 					base: url,
 					proxy: shouldProxyPrivateDownload,
 					repo: name,
+					tag: releaseData.tag_name,
 					token,
 				}
 			)

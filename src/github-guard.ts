@@ -137,6 +137,40 @@ export function stripUserinfo(value: string | undefined) {
 	return publicBaseHost(value) ?? undefined
 }
 
+function ownedReleaseAssetId(raw: string, account: string, repo: string) {
+	if (!isSafeSlug(account) || !isSafeSlug(repo)) return null
+
+	const parsed = parseHttps(raw)
+	if (parsed?.hostname !== 'api.github.com') return null
+	if (parsed.search || parsed.hash) return null
+
+	const prefix = `/repos/${account}/${repo}/releases/assets/`
+	if (!parsed.pathname.startsWith(prefix)) return null
+
+	const id = parsed.pathname.slice(prefix.length)
+	if (!/^\d+$/.test(id)) return null
+
+	return id
+}
+
+function installerDownloadUrl(
+	fileName: string,
+	tag: string | undefined,
+	input: { account: string; base?: string; proxy: boolean; repo: string }
+) {
+	if (!tag || !/^v\d+/.test(tag) || !isPublicReleaseAsset(fileName)) return null
+
+	const file = encodeURIComponent(fileName)
+	const github = `https://github.com/${input.account}/${input.repo}/releases/download/${tag}/${file}`
+
+	if (!input.proxy) return ownedBrowserDownload(github, input.account, input.repo)
+
+	const host = publicBaseHost(input.base)
+	if (!host) return null
+
+	return `https://${host}/${input.repo}/download/${tag}/${file}`
+}
+
 export function ownedReleaseUrl(
 	raw: string,
 	account: string,
@@ -211,11 +245,31 @@ export type SanitizedLatest = {
 	version?: string
 }
 
+type ReleaseFile = {
+	name?: string
+	url?: string
+}
+
 export function sanitizeLatestJson(
 	raw: RawLatest,
-	input: { account: string; base?: string; proxy: boolean; repo: string; token?: string }
+	input: {
+		account: string
+		assets?: ReleaseFile[]
+		base?: string
+		proxy: boolean
+		repo: string
+		tag?: string
+		token?: string
+	}
 ) {
 	const platforms: SanitizedLatest['platforms'] = {}
+	const files = new Map<string, string>()
+
+	for (const asset of input.assets ?? []) {
+		if (!asset.url || !asset.name) continue
+		const id = ownedReleaseAssetId(asset.url, input.account, input.repo)
+		if (id) files.set(id, asset.name)
+	}
 
 	for (const [key, platform] of Object.entries(raw.platforms ?? {})) {
 		if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,40}$/.test(key)) continue
@@ -227,9 +281,12 @@ export function sanitizeLatestJson(
 		}
 
 		if (typeof platform?.url === 'string') {
-			const url =
-				ownedReleaseUrl(platform.url, input.account, input.repo, input.base, input.proxy) ??
-				safeRelativeAsset(platform.url)
+			const assetId = ownedReleaseAssetId(platform.url, input.account, input.repo)
+			const fileName = assetId ? files.get(assetId) : undefined
+			const url = fileName
+				? installerDownloadUrl(fileName, input.tag, input)
+				: (ownedReleaseUrl(platform.url, input.account, input.repo, input.base, input.proxy) ??
+					safeRelativeAsset(platform.url))
 
 			if (url && !containsToken(url, input.token)) entry.url = url
 		}
