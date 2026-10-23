@@ -1,4 +1,3 @@
-/* eslint-disable no-new */
 /* global describe, it, expect */
 const Cache = require('../lib/cache')
 

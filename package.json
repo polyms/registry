@@ -1,32 +1,29 @@
 {
-  "name": "hazel-server",
+  "name": "@polyms/registry",
   "version": "5.1.1",
+  "description": "Polyms Registry — update feed for Flutter and Tauri apps, and a proxy for the GitHub npm registry",
+  "author": "Polyms",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/polyms/registry.git"
+  },
+  "homepage": "https://github.com/polyms/registry#readme",
+  "bugs": {
+    "url": "https://github.com/polyms/registry/issues"
+  },
   "main": "lib/index.js",
-  "description": "Lightweight update server for Electron apps",
   "scripts": {
     "dev": "npx vercel dev",
-    "test": "xo && jest",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "biome check .",
+    "test": "biome lint . && jest",
     "precommit": "lint-staged"
   },
-  "license": "MIT",
-  "repository": "vercel/hazel",
-  "xo": {
-    "extends": [
-      "prettier"
-    ],
-    "rules": {
-      "camelcase": 0,
-      "new-cap": 0,
-      "unicorn/no-process-exit": 0,
-      "no-await-in-loop": 0,
-      "unicorn/import-index": 0
-    }
-  },
   "lint-staged": {
-    "*.js": [
-      "yarn test && :",
-      "prettier --single-quote --no-semi --write --no-editorconfig",
-      "git add"
+    "*.{js,json,md}": [
+      "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true"
     ]
   },
   "dependencies": {
@@ -46,10 +43,9 @@
     "test-listen": "1.1.0"
   },
   "devDependencies": {
-    "eslint-config-prettier": "2.9.0",
+    "@biomejs/biome": "2.6.2",
     "husky": "0.14.3",
-    "lint-staged": "7.0.0",
-    "prettier": "1.10.2",
-    "xo": "0.20.3"
-  }
+    "lint-staged": "7.0.0"
+  },
+  "packageManager": "pnpm@12.14.0+sha512.c18ba6d87993d3d164cb5e8948f32b2c06ee854487e06cd8d86781342fb3e5bb4634367034711e86802baa9c37bea906ce1929ad08d70884c97d801df13389a6"
 }
