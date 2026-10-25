@@ -156,18 +156,20 @@ export default class Cache {
 		})
 
 		const listed = await Promise.all(
-			visible.map(async item => {
+			visible.map(async (item): Promise<ListedRelease | undefined> => {
 				if (!item.tag_name) return undefined
 
-				return {
+				const release: ListedRelease = {
 					files: filesForRelease(item),
-					publishedAt: item.published_at,
 					tag: item.tag_name,
 					version: (await this.releaseVersion(item)) ?? item.tag_name,
 				}
+				if (item.published_at) release.publishedAt = item.published_at
+
+				return release
 			})
 		)
-		this.releases = listed.filter((item): item is ListedRelease => item !== undefined)
+		this.releases = listed.flatMap(item => (item ? [item] : []))
 
 		const release = visible[0]
 
