@@ -1,24 +1,19 @@
 import ms from 'ms'
 import semver from 'semver'
 
-import { fetchRepo, isRepoGitObjectUrl, isSafePackageName, isSafeSlug } from './github-guard.js'
+import { isSafePackageName } from './github-guard.js'
+import { fetchPackument } from './npm-proxy.js'
 
 const defaultPackage = '@polyms/ui-kit'
 
 export type PackageRelease = {
 	publishedAt?: string
-	tag: string
 	version: string
 }
 
-type MatchingRef = {
-	object?: { sha?: string; type?: string; url?: string }
-	ref?: string
-}
-
-type TagObject = {
-	commit?: { committer?: { date?: string } }
-	tagger?: { date?: string }
+type PackagePackument = {
+	time?: Record<string, string>
+	versions?: Record<string, unknown>
 }
 
 export function parsePackageNames(value: string | undefined): string[] {
@@ -36,24 +31,17 @@ export function packageSlug(name: string) {
 	return name.slice(name.indexOf('/') + 1)
 }
 
-export function selectPackageReleases(
-	name: string,
-	refs: MatchingRef[]
-): Array<PackageRelease & { url?: string }> {
-	const prefix = `${packageSlug(name)}@`
-	const releases: Array<PackageRelease & { url?: string }> = []
+export function selectPackageReleases(packument: PackagePackument): PackageRelease[] {
+	const versions = packument.versions ?? {}
+	const time = packument.time ?? {}
+	const releases: PackageRelease[] = []
 
-	for (const item of refs) {
-		const ref = item.ref ?? ''
-		const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : ''
-		if (!tag.startsWith(prefix)) continue
+	for (const version of Object.keys(versions)) {
+		if (semver.valid(version) !== version) continue
 
-		const version = tag.slice(prefix.length)
-		if (!semver.valid(version)) continue
-
+		const publishedAt = time[version]
 		releases.push({
-			tag,
-			url: item.object?.url,
+			publishedAt: typeof publishedAt === 'string' ? publishedAt : undefined,
 			version,
 		})
 	}
@@ -119,47 +107,9 @@ export class PackageCatalog {
 	}
 
 	private async loadPackage(name: string) {
-		const slug = packageSlug(name)
-		const { account, token } = this.config
-		if (!isSafeSlug(account) || !isSafeSlug(slug)) throw new Error('Refused GitHub URL')
+		const { token } = this.config
+		if (!isSafePackageName(name) || !token) throw new Error('Refused npm package')
 
-		const url = `https://api.github.com/repos/${account}/${slug}/git/matching-refs/tags/${slug}@`
-		const response = await fetchRepo(url, token, 'application/vnd.github+json', account, slug)
-
-		if (!response.ok) {
-			throw new Error(`GitHub API responded with ${response.status} for url ${url}`)
-		}
-
-		const data = (await response.json()) as MatchingRef[]
-		if (!Array.isArray(data)) throw new Error('GitHub tag list was not an array')
-
-		const selected = selectPackageReleases(name, data)
-
-		return Promise.all(
-			selected.map(async release => {
-				const publishedAt = await this.publishedAt(release.url, packageSlug(name))
-				return {
-					publishedAt,
-					tag: release.tag,
-					version: release.version,
-				}
-			})
-		)
-	}
-
-	private async publishedAt(url: string | undefined, slug: string) {
-		const { account, token } = this.config
-		if (!url || !isRepoGitObjectUrl(url, account, slug)) return undefined
-
-		try {
-			const response = await fetchRepo(url, token, 'application/vnd.github+json', account, slug)
-			if (!response.ok) return undefined
-
-			const body = (await response.json()) as TagObject
-			return body.tagger?.date ?? body.commit?.committer?.date
-		} catch (error) {
-			console.error(error)
-			return undefined
-		}
+		return selectPackageReleases(await fetchPackument(name, token))
 	}
 }

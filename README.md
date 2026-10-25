@@ -56,7 +56,7 @@ Overview of each app's cached latest release, in list order: version, notes, and
 
 ### `GET /:name/releases`
 
-Release history for one product. Each app is `/:name/releases`, with a title-cased heading. File links on that page are `/{app}/download/{version}/{file}`. Each npm name in `PACKAGES` is `/{package}/releases`, using the name after the scope. Tags are read from `{ACCOUNT}/{package}` with the prefix `{package}@`. The same page renders both. An app name wins when it is also a package slug.
+Release history for one product. Each app is `/:name/releases`, with a title-cased heading. When a release includes `latest.json`, the version on the page is that file's `version`, not the git tag. File links on that page are `/{app}/download/{version}/{file}`. Each npm name in `PACKAGES` is `/{package}/releases`, using the name after the scope. Versions come from that package’s GitHub Packages packument, with the publish time from its `time` map. The same page renders both. An app name wins when it is also a package slug.
 
 Each app name below is one repository from `APPS`. Unknown names → `404`. There is no unscoped `/download`, `/latest.json`, or `/update` alias.
 

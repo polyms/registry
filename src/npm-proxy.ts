@@ -12,6 +12,7 @@ type VersionDoc = {
 
 type Packument = {
 	'dist-tags'?: Record<string, string>
+	time?: Record<string, string>
 	versions?: Record<string, VersionDoc>
 }
 
@@ -189,6 +190,25 @@ function selectVersion(packument: Packument, spec: string): VersionDoc | undefin
 	if (tagged) return versions[tagged]
 
 	return versions[spec]
+}
+
+export async function fetchPackument(name: string, token: string): Promise<Packument> {
+	const url = upstreamPackumentUrl(name)
+	assertNpmUrl(url)
+
+	const response = await fetch(url, {
+		headers: authHeaders(token, 'application/json'),
+		redirect: 'manual',
+	})
+
+	if (response.status >= 300 && response.status < 400) throw new Error('Refused npm redirect')
+	if (!response.ok) throw new Error(`npm registry responded with ${response.status} for ${name}`)
+
+	const body = (await response.json()) as unknown
+	if (!body || typeof body !== 'object' || Array.isArray(body))
+		throw new Error('npm packument was not an object')
+
+	return body as Packument
 }
 
 function assertNpmUrl(raw: string) {

@@ -280,11 +280,17 @@ function buildApp(
 		version: string,
 		filename: string
 	) {
-		if (!version || !/^v\d+/.test(version)) return c.text('The specified platform is not valid', 500)
+		if (!version) return c.text('The specified platform is not valid', 500)
 		if (!isPublicReleaseAsset(filename)) return c.text('Asset not found', 404)
 
+		const tag = /^v\d+/.test(version) ? version : await releaseTag(repository, version)
+		if (!tag) {
+			if (!semver.valid(version)) return c.text('The specified platform is not valid', 500)
+			return c.text('Release not found', 404)
+		}
+
 		try {
-			const releaseUrl = `https://api.github.com/repos/${account}/${repository}/releases/tags/${version}`
+			const releaseUrl = `https://api.github.com/repos/${account}/${repository}/releases/tags/${tag}`
 			const releaseResponse = await fetchRepo(
 				releaseUrl,
 				token,
@@ -316,6 +322,11 @@ function buildApp(
 			console.error(error)
 			return c.text('Error downloading release asset', 500)
 		}
+	}
+
+	async function releaseTag(repository: string, version: string) {
+		const match = (await cacheFor.get(repository)?.loadReleases())?.find(item => item.version === version)
+		return match?.tag
 	}
 
 	app.get('/:name/download/:version/:file', async c => {

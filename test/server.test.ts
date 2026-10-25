@@ -96,6 +96,78 @@ describe('Server', () => {
 		expect(unscopedLatest.status).toBe(404)
 	})
 
+	it('shows the version from latest.json instead of the git tag', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string) => {
+				const href = String(url)
+				if (href.endsWith('/releases/assets/15')) return Response.json({ version: '0.2.15' })
+				if (href.endsWith('/repos/polyms/studio/releases/tags/v0.2.15')) {
+					return Response.json({
+						assets: [
+							{
+								browser_download_url: 'https://github.com/polyms/studio/releases/download/v0.2.15/Studio.dmg',
+								name: 'Studio.dmg',
+							},
+						],
+					})
+				}
+				if (href.includes('/repos/polyms/studio/releases')) {
+					return Response.json([
+						{
+							assets: [
+								{
+									browser_download_url:
+										'https://github.com/polyms/studio/releases/download/v0.2.15/latest.json',
+									content_type: 'application/json',
+									name: 'latest.json',
+									size: 100,
+									url: 'https://api.github.com/repos/polyms/studio/releases/assets/15',
+								},
+								{
+									browser_download_url:
+										'https://github.com/polyms/studio/releases/download/v0.2.15/Studio.dmg',
+									content_type: 'application/octet-stream',
+									name: 'Studio.dmg',
+									size: 2_000_000,
+									url: 'https://api.github.com/repos/polyms/studio/releases/assets/16',
+								},
+							],
+							body: 'studio notes',
+							draft: false,
+							prerelease: false,
+							published_at: '2026-10-23T19:39:22Z',
+							tag_name: 'v0.2.15',
+						},
+					])
+				}
+				return new Response('missing', { status: 404 })
+			})
+		)
+
+		const app = createApp({
+			account: 'polyms',
+			apps: ['studio'],
+			packages: [],
+		})
+		const home = await app.request('http://localhost/')
+		const homeHtml = await home.text()
+		const releases = await app.request('http://localhost/studio/releases')
+		const html = await releases.text()
+		const download = await app.request('http://localhost/studio/download/0.2.15/Studio.dmg')
+
+		expect(home.status).toBe(200)
+		expect(homeHtml).toContain('>0.2.15<')
+		expect(homeHtml).not.toContain('>v0.2.15<')
+		expect(html).toContain('<h2>0.2.15</h2>')
+		expect(html).not.toContain('<h2>v0.2.15</h2>')
+		expect(html).toContain('href="/studio/download/0.2.15/Studio.dmg"')
+		expect(download.status).toBe(302)
+		expect(download.headers.get('location')).toBe(
+			'https://github.com/polyms/studio/releases/download/v0.2.15/Studio.dmg'
+		)
+	})
+
 	it('renders two app blocks and serves the second app releases', async () => {
 		vi.stubGlobal(
 			'fetch',

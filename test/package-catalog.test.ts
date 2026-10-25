@@ -4,24 +4,26 @@ import { createApp } from '../src/app.js'
 import { PackageCatalog, parsePackageNames, selectPackageReleases } from '../src/package-catalog.js'
 import { renderOverview } from '../src/views/overview.js'
 
-const tags = [
-	{
-		object: { sha: 'old', type: 'tag', url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/old' },
-		ref: 'refs/tags/ui-kit@1.0.4',
+const packument = {
+	time: {
+		created: '2026-06-01T00:00:00Z',
+		modified: '2026-07-28T11:36:20Z',
+		'1.0.4': '2026-07-01T00:00:00Z',
+		'1.0.5': '2026-07-28T11:36:20Z',
 	},
-	{
-		object: { sha: 'docs', type: 'tag', url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/docs' },
-		ref: 'refs/tags/docs@0.4.38',
+	versions: {
+		'1.0.4': { dist: { tarball: 'https://example.test/steal.tgz' } },
+		'1.0.5': { dist: { tarball: 'https://npm.pkg.github.com/download/@polyms/ui-kit/1.0.5/abc' } },
+		'not-a-version': {},
 	},
-	{
-		object: { sha: 'new', type: 'tag', url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/new' },
-		ref: 'refs/tags/ui-kit@1.0.5',
-	},
-	{
-		object: { sha: 'bad', type: 'tag', url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/bad' },
-		ref: 'refs/tags/ui-kit@not-a-version',
-	},
-]
+}
+
+function packumentResponse(url: string) {
+	const href = String(url)
+	if (href === 'https://npm.pkg.github.com/@polyms%2Fui-kit') return Response.json(packument)
+	if (href === 'https://npm.pkg.github.com/@polyms%2Ficons') return Response.json({ versions: {} })
+	return new Response('missing', { status: 404 })
+}
 
 afterEach(() => {
 	vi.unstubAllGlobals()
@@ -37,59 +39,41 @@ describe('package catalog', () => {
 		expect(parsePackageNames('')).toEqual([])
 	})
 
-	it('keeps tags for the named package and sorts the newest semver first', () => {
-		const releases = selectPackageReleases('@polyms/ui-kit', tags)
-
-		expect(releases.map(release => release.version)).toEqual(['1.0.5', '1.0.4'])
-		expect(releases[0]?.tag).toBe('ui-kit@1.0.5')
-		expect(selectPackageReleases('@polyms/icons', tags)).toEqual([])
-	})
-
-	it('reads the tagger date for each release', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn(async (url: string) => {
-				if (String(url).includes('matching-refs')) return Response.json(tags)
-				if (String(url).endsWith('/new')) {
-					return Response.json({ tagger: { date: '2026-07-28T11:36:20Z' } })
-				}
-				if (String(url).endsWith('/old')) {
-					return Response.json({ tagger: { date: '2026-07-01T00:00:00Z' } })
-				}
-				return new Response('missing', { status: 404 })
-			})
-		)
-
-		const releases = await new PackageCatalog({
-			account: 'polyms',
-			packages: ['@polyms/ui-kit'],
-		}).load('@polyms/ui-kit')
+	it('keeps published versions and sorts the newest semver first', () => {
+		const releases = selectPackageReleases(packument)
 
 		expect(releases.map(release => release.version)).toEqual(['1.0.5', '1.0.4'])
 		expect(releases[0]?.publishedAt).toBe('2026-07-28T11:36:20Z')
 		expect(releases[1]?.publishedAt).toBe('2026-07-01T00:00:00Z')
+		expect(selectPackageReleases({ versions: {} })).toEqual([])
 	})
 
-	it('does not send the token to a tag object outside the repo', async () => {
-		const fetchMock = vi.fn(async (url: string) => {
-			if (String(url).includes('matching-refs')) {
-				return Response.json([
-					{
-						object: { url: 'https://example.test/steal' },
-						ref: 'refs/tags/ui-kit@1.2.0',
-					},
-					{
-						object: { url: 'https://api.github.com/repos/other/secret/contents/.env' },
-						ref: 'refs/tags/ui-kit@1.1.0',
-					},
-					{
-						object: { url: 'https://api.github.com/repos/polyms/ui-kit/git/tags/ok' },
-						ref: 'refs/tags/ui-kit@1.0.0',
-					},
-				])
-			}
+	it('reads versions from the npm packument', async () => {
+		const fetchMock = vi.fn(async (url: string) => packumentResponse(url))
+		vi.stubGlobal('fetch', fetchMock)
 
-			return Response.json({ tagger: { date: '2026-07-28T11:36:20Z' } })
+		const releases = await new PackageCatalog({
+			account: 'polyms',
+			packages: ['@polyms/ui-kit'],
+			token: 'test-token',
+		}).load('@polyms/ui-kit')
+
+		expect(releases.map(release => release.version)).toEqual(['1.0.5', '1.0.4'])
+		expect(releases[0]?.publishedAt).toBe('2026-07-28T11:36:20Z')
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(fetchMock).toHaveBeenCalledWith('https://npm.pkg.github.com/@polyms%2Fui-kit', {
+			headers: {
+				Accept: 'application/json',
+				Authorization: 'Bearer test-token',
+				'User-Agent': 'polyms-registry',
+			},
+			redirect: 'manual',
+		})
+	})
+
+	it('does not follow a packument redirect or any url inside it', async () => {
+		const fetchMock = vi.fn(async () => {
+			return new Response(null, { headers: { location: 'https://example.test/steal' }, status: 302 })
 		})
 		vi.stubGlobal('fetch', fetchMock)
 
@@ -99,16 +83,11 @@ describe('package catalog', () => {
 			token: 'test-token',
 		}).load('@polyms/ui-kit')
 
-		expect(releases.map(release => release.version)).toEqual(['1.2.0', '1.1.0', '1.0.0'])
-		expect(releases[0]?.publishedAt).toBeUndefined()
-		expect(releases[1]?.publishedAt).toBeUndefined()
-		expect(releases[2]?.publishedAt).toBe('2026-07-28T11:36:20Z')
-
-		const urls = fetchMock.mock.calls.map(call => String(call[0]))
-		expect(urls.every(url => url.startsWith('https://api.github.com/repos/polyms/ui-kit/'))).toBe(true)
-		expect(urls.join('\n')).not.toContain('example.test')
-		expect(urls.join('\n')).not.toContain('other/secret')
-		expect(urls.join('\n')).not.toContain('test-token')
+		expect(releases).toEqual([])
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(String(fetchMock.mock.calls[0]?.[0])).toBe('https://npm.pkg.github.com/@polyms%2Fui-kit')
+		expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('test-token')
+		expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('example.test')
 	})
 })
 
@@ -208,19 +187,15 @@ describe('home', () => {
 	it('serves one releases page for the app and each package', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(async (url: string) => {
-				if (String(url).includes('matching-refs')) return Response.json(tags)
-				if (String(url).endsWith('/new')) {
-					return Response.json({ tagger: { date: '2026-07-28T11:36:20Z' } })
-				}
-				return Response.json({ tagger: { date: '2026-07-01T00:00:00Z' } })
-			})
+			vi.fn(async (url: string) => packumentResponse(url))
 		)
 
 		const app = createApp({
 			account: 'polyms',
 			apps: ['studio'],
 			packages: ['@polyms/ui-kit', '@polyms/icons'],
+			token: 'test-token',
+			url: 'https://registry.polyms.dev',
 		})
 		const uiKit = await app.request('http://localhost:3000/ui-kit/releases')
 		const html = await uiKit.text()

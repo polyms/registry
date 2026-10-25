@@ -1,7 +1,8 @@
 import retry from 'async-retry'
 import ms from 'ms'
+import semver from 'semver'
 
-import { fetchRepo, redactNotes } from './github-guard.js'
+import { containsToken, fetchRepo, redactNotes } from './github-guard.js'
 import checkPlatform from './platform.js'
 
 export type CacheConfig = {
@@ -40,6 +41,7 @@ export type ListedFile = {
 export type ListedRelease = {
 	files: ListedFile[]
 	publishedAt?: string
+	tag: string
 	version: string
 }
 
@@ -153,33 +155,36 @@ export default class Cache {
 			return !item.draft && isPre
 		})
 
-		this.releases = visible.flatMap(item => {
-			if (!item.tag_name) return []
+		const listed = await Promise.all(
+			visible.map(async item => {
+				if (!item.tag_name) return undefined
 
-			return [
-				{
+				return {
 					files: filesForRelease(item),
 					publishedAt: item.published_at,
-					version: item.tag_name,
-				},
-			]
-		})
+					tag: item.tag_name,
+					version: (await this.releaseVersion(item)) ?? item.tag_name,
+				}
+			})
+		)
+		this.releases = listed.filter((item): item is ListedRelease => item !== undefined)
 
 		const release = visible[0]
 
 		if (!release?.assets || !Array.isArray(release.assets)) return
 
-		const { tag_name } = release
+		const version = this.releases.find(item => item.tag === release.tag_name)?.version
+		if (!version) return
 
-		if (this.latest.version === tag_name) {
+		if (this.latest.version === version) {
 			console.log('Cached version is the same as latest')
 			this.lastUpdate = Date.now()
 			return
 		}
 
-		console.log(`Caching version ${tag_name}...`)
+		console.log(`Caching version ${version}...`)
 
-		this.latest.version = tag_name
+		this.latest.version = version
 		this.latest.notes = typeof release.body === 'string' ? redactNotes(release.body, token) : release.body
 		this.latest.pub_date = release.published_at
 		this.latest.platforms = {}
@@ -210,8 +215,27 @@ export default class Cache {
 			}
 		}
 
-		console.log(`Finished caching version ${tag_name}`)
+		console.log(`Finished caching version ${version}`)
 		this.lastUpdate = Date.now()
+	}
+
+	private async releaseVersion(release: GitHubRelease) {
+		const asset = release.assets?.find(item => item.name === 'latest.json')
+		const { account, repository, token } = this.config
+		if (!asset?.url || !account || !repository) return undefined
+
+		try {
+			const response = await fetchRepo(asset.url, token, 'application/octet-stream', account, repository)
+			if (!response.ok) return undefined
+
+			const body = (await response.json()) as { version?: unknown }
+			if (typeof body.version !== 'string' || containsToken(body.version, token)) return undefined
+
+			return semver.valid(body.version) ?? undefined
+		} catch (error) {
+			console.error(error)
+			return undefined
+		}
 	}
 
 	isOutdated() {
